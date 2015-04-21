@@ -18,11 +18,15 @@ bool vector_size_comparator(const std::pair<int, std::vector<int>>& a,
 
 std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
     const Graph* phys_topology,
-    const std::vector<std::vector<int>>& location_constraints) {
+    const std::vector<std::vector<int>>& location_constraints,
+    std::pair <int, std::vector<int>> seed) {
   std::unique_ptr<std::vector<std::vector<int>>> node_maps(
       new std::vector<std::vector<int>>(2));
   (*node_maps)[PRIMARY] = std::vector<int>(location_constraints.size(), NIL);
   (*node_maps)[BACKUP] = std::vector<int>(location_constraints.size(), NIL);
+  int mapped_node = seed.first;
+  (*node_maps)[PRIMARY][mapped_node] = seed.second[PRIMARY];
+  (*node_maps)[BACKUP][mapped_node] = seed.second[BACKUP];
   std::vector<std::pair<int, std::vector<int>>> temp_loc_constraints;
   for (int i = 0; i < location_constraints.size(); ++i) {
     temp_loc_constraints.push_back(std::make_pair(i, location_constraints[i]));
@@ -38,8 +42,11 @@ std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
   // select the physical node that is not already mapped to some other virtual
   // node or its backup and has minimum overlap in the location_constraint list.
   std::vector<bool> taken(phys_topology->node_count(), false);
+  taken[seed.second[PRIMARY]] = true;
+  taken[seed.second[BACKUP]] = true;
   for (int i = 0; i < temp_loc_constraints.size(); ++i) {
     int vnode = temp_loc_constraints[i].first;
+    if (vnode == mapped_node) continue;
     // printf("Mapping vnode %d\n", vnode);
     int best_candidate = NIL;
     for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
@@ -86,17 +93,20 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
   std::vector<bool> taken(phys_topology->node_count(), false);
   auto& primary = partitions->at(PRIMARY);
   auto& backup = partitions->at(BACKUP);
+  std::vector<int> primary_seed, backup_seed;
   for (auto& node : node_maps->at(PRIMARY)) {
     primary.push_back(node);
+    primary_seed.push_back(node);
     taken[node] = true;
   }
   for (auto& node : node_maps->at(BACKUP)) {
     backup.push_back(node);
+    backup_seed.push_back(node);
     taken[node] = true;
   }
   for (int i = 0; i < phys_topology->node_count(); ++i) {
     if (!taken[i]) {
-      if (!IsFeasiblePartition(phys_topology, primary, backup, i)) {
+      if (!IsFeasiblePartition(phys_topology, primary, backup_seed, i)) {
         backup.push_back(i);
       } else {
         int component_decrease_primary =

@@ -72,6 +72,20 @@ class Graph {
     node_count_ = edge_count_ = 0;
   }
 
+  Graph(const Graph& graph) {
+    adj_list_ = std::unique_ptr<std::vector<std::vector<edge_endpoint>>>(
+        new std::vector<std::vector<edge_endpoint>>);
+    for (int i = 0; i < graph.node_count(); ++i) {
+      auto& adj_list = graph.adj_list()->at(i);
+      for (auto& neighbor : adj_list) {
+        if (i > neighbor.node_id) {
+          this->add_edge(i, neighbor.node_id, neighbor.bandwidth, 
+                         neighbor.delay, neighbor.cost);
+        }
+      }
+    }
+  }
+
   // Accessor methods.
   int node_count() const { return node_count_; }
   int edge_count() const { return edge_count_; }
@@ -210,4 +224,22 @@ class DisjointSet {
   std::vector<int> rank_;
   std::vector<bool> valid_mask_;
 };
+
+struct VNEmbedding {
+  std::unique_ptr<std::vector<std::vector<int>>> node_map;
+  std::unique_ptr<std::map<std::pair<int,int>, 
+    std::vector<std::pair<int,int>>>> primary_edge_map;
+  std::unique_ptr<std::map<std::pair<int,int>, 
+    std::vector<std::pair<int,int>>>> backup_edge_map;
+  int cost;
+};
+
+struct ThreadParameter {
+  int vnode_seed;
+  int primary_seed;
+  int backup_seed;
+  const Graph* phys_topology;
+  const Graph* virt_topology;
+  const std::vector<std::vector<int>>* location_constraints;
+}
 #endif  // MIDDLEBOX_PLACEMENT_SRC_DATASTRUCTURE_H_

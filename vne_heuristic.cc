@@ -5,6 +5,134 @@
 #include "vne_heuristic_solver.h"
 
 #include <chrono>
+#include <pthread.h>
+
+void *EmbedVNThread(void* args) {
+  ThreadParameter* parameter = reinterpret_cast<ThreadParameter*>(args);
+  std::unique_ptr<Graph> phys_topology(new Graph(*(parameter->phys_topology)));
+  std::unique_ptr<Graph> virt_topology(new Graph(*(parameter->virt_topology)));
+  std::unique_ptr<std::vector<std::vector<int>>> location_constraints (
+      new std::vector<std::vector<int>>(*(parameter->location_constraints)));
+  std::pair<int, std::vector<int>> seed;
+  seed.first = parameter->vnode_seed;
+  seed.second.emplace_back(parameter->primary_seed);
+  seed.second.emplace_back(parameter->backup_seed);
+  int cost = 0;
+  auto node_map = CreateInitialNodeMap(
+      physical_topology.get(), *(parameter->location_constraints));
+  // for (int i = 0; i < (*node_map)[PRIMARY].size(); ++i) 
+  //  printf(" %d", (*node_map)[PRIMARY][i]);
+  // printf("\n");
+  // for (int i = 0; i < (*node_map)[BACKUP].size(); ++i)
+  //   printf(" %d", (*node_map)[BACKUP][i]);
+  // printf("\n");
+  bool node_map_failed = false;
+  for (auto& m : *node_map) {
+    for (auto& n : m) {
+      if (n == -1) {
+        node_map_failed = true;
+        break;
+      }
+    }
+    if (node_map_failed) break;
+  }
+  if (node_map_failed) {
+    *cost = INF;
+  }
+
+  auto& primary_node_map = (*node_map)[PRIMARY];
+  auto& backup_node_map = (*node_map)[BACKUP];
+  auto partitions = PartitionGraph(physical_topology.get(), node_map.get());
+  auto& primary_partition = (*partitions)[PRIMARY];
+  auto& backup_partition = (*partitions)[BACKUP];
+
+  bool edge_map_failed = false;
+  auto emap = EmbedVN(physical_topology.get(), virt_topology.get(), primary_partition, primary_node_map);
+  for (auto emap_it = emap->begin(); emap_it != empa->end(); ++emap_it) {
+    if (emap_it->second.empty()) {
+      edge_map_failed = true;
+      cost = INF;
+      break;
+    }
+  }
+  
+  auto semap = EmbedVN(physical_topology.get(), virt_topology.get(), backup_partition, backup_node_map);
+  for (auto semap_it = semap->begin(); semap_it != semap->end(); ++semap_it) {
+    if (semap_it->second.empty()) {
+      edge_map_failed = true;
+      cost = INF;
+      break;
+    }
+  }
+
+  // Compute embedding cost.
+  cost = 0;
+  for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
+    auto& vlink = emap_it->first;
+    auto& plinks = emap_it->second;
+    for (auto& e : plinks) {
+      cost += physical_topology->get_edge_cost(e.first, e.second) * 
+        virt_topology->get_edge_bandwidth(vlink.first, vlink.second);
+    }
+  }
+  for (auto semap_it = semap->begin(); semap_it != semap->end(); ++semap_it) {
+    auto& vlink = semap_it->first;
+    auto& plinks = semap_it->second;
+    for (auto& e : plinks) {
+      cost += physical_topology->get_edge_cost(e.first, e.second) * 
+        virt_topology->get_edge_bandwidth(vlink.first, vlink.second);
+    }
+  }
+  VNEmbedding* embedding = new VNEmbedding();
+  embedding->node_map = std::move(node_map);
+  embedding->primary_edge_map = std::move(emap);
+  embedding->backup_edge_map = std::move(semap);
+  embedding->cost = cost;
+  pthread_exit((void*)embedding);
+}
+
+void ProtectedVNE(const Graph* phsy_topology,
+                  const Graph* virt_topology,
+                  const std::vector<std::vector<int>>& location_constraints) {
+  int min_constraint_size = INF, most_constrained_vnode = NIL;
+  for (int i = 0; i < locations_constraints.size(); ++i) {
+    if (location_constraints[i].size() < min_constraint_size) {
+      min_constraint_size = location_constraints[i].size();
+      most_constrained_vnode = i;
+    }
+  }
+  int n_threads = (min_constraint_size * (min_constraint_size - 1)) / 2;
+  std::vector<pthread_t> threads(n_threads);
+  int thread_id = 0;
+  std::unique_ptr<std::vector<ThreadParameter>> parameters(new std::vector<ThreadParameters>(n_threads));
+  for (int i = 0; i < location_constraints[most_constrained_vnode].size(); ++i) {
+    for (int j = i + 1; j < location_constraints[most_constrained_vnode].size(); ++j) {
+      int primary = location_constraints[most_constrained_vnode][i];
+      int backup = location_constraints[most_constrained_vnode][j];
+      ThreadParameter& parameter = parameters->at(thread_id);
+      parameter.vnode_seed = most_constrained_vnode;
+      parameter.primary_seed = primary;
+      parameter.backup_seed = backup;
+      parameter.phys_topology = phys_topology;
+      parameter.virt_topology = virt_topology;
+      parameter.location_constraints = &location_constraints;
+      pthread_create(&threads[thread_id++], NULL, &EmbedVNThread, &parameter);
+    }
+  }
+  std::vector<std::unique_ptr<VNEmbedding>> embeddings(n_threads);
+  for (int i = 0; i < n_threads; ++i) {
+    void* ret_value;
+    pthread_join(threads[i], &ret_value);
+    embeddings[i] = std::unique_ptr<VNEmbedding>(reinterpret_cast<VNEmbedding*>(ret_value));
+  }
+  int min_cost_embedding = 0;
+  for (int i = 0; i < embeddings.size(); ++i) {
+    if (embeddings[i]->cost < embeddings[min_cost_embedding]->cost) {
+      min_cost_embedding = i;
+    }
+  }
+  return std::move(embeddings[min_cost_embedding]);
+}
 
 int main(int argc, char* argv[]) {
   using std::string;
