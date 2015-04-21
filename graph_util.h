@@ -97,17 +97,21 @@ bool IsFeasiblePartition(const Graph* graph,
     auto& adj_list = graph->adj_list()->at(i);
     for (auto& neighbor : adj_list) {
       if (is_partition_a[i] || is_partition_a[neighbor.node_id]) continue;
+      // printf("Merging %d and %d\n", i, neighbor.node_id);
       ds.Union(i, neighbor.node_id);
     }
   }
+  // ds.Print();
   return ds.CountDistinct() <= 1;
 }
 
 bool IsFeasibleBetterAssignment(const Graph* graph, std::vector<int>& partition,
                                 const std::vector<int>& forbidden,
                                 int candidate, int best_candidate) {
-  if (!IsFeasiblePartition(graph, partition, forbidden, candidate))
+  if (!IsFeasiblePartition(graph, partition, forbidden, candidate)) {
+    // printf("Not feasible to assign %d\n", candidate);
     return false;
+  }
   if (best_candidate == NIL) return true;
   int component_decrease_current =
       NumConnectedComponentsDecrease(graph, partition, candidate);

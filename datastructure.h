@@ -166,6 +166,7 @@ class DisjointSet {
         ++rank_[x_root];
       }
     }
+    // this->Print();
   }
 
   int Find(int x) {
@@ -177,7 +178,7 @@ class DisjointSet {
     int ret = 0;
     std::vector<int> count(n_, 0);
     for (int i = 0; i < set_.size(); ++i) {
-      if (valid_mask_[i]) ++count[set_[i]];
+      if (valid_mask_[i]) ++count[Find(i)];
     }
     for (auto& x : count)
       if (x != 0) ++ret;
@@ -189,7 +190,8 @@ class DisjointSet {
 
   void Print() {
     for (int x = 0; x < set_.size(); ++x) {
-      if (valid_mask_[x]) printf("|%d: %d|", x, set_[x]);
+      if (valid_mask_[x]) printf("|%d: %d|", x, Find(x));
+      // printf("|%d: %d|", x, set_[x]);
     }
     printf("\n");
   }

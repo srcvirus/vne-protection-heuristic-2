@@ -40,12 +40,15 @@ std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
   std::vector<bool> taken(phys_topology->node_count(), false);
   for (int i = 0; i < temp_loc_constraints.size(); ++i) {
     int vnode = temp_loc_constraints[i].first;
+    // printf("Mapping vnode %d\n", vnode);
     int best_candidate = NIL;
     for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
       int candidate = temp_loc_constraints[i].second[j];
+      // printf("[Primary] Current candidate: %d\n", candidate);
       if (!taken[candidate]) {
         if (IsFeasibleBetterAssignment(phys_topology, primary, backup,
                                        candidate, best_candidate)) {
+          // printf("[Primary] Best candidate updated to: %d\n", candidate);
           best_candidate = candidate;
         }
       }
@@ -58,9 +61,11 @@ std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
     best_candidate = NIL;
     for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
       int candidate = temp_loc_constraints[i].second[j];
+      // printf("[Backup] Current candidate: %d\n", candidate);
       if (!taken[candidate]) {
         if (IsFeasibleBetterAssignment(phys_topology, backup, primary,
                                        candidate, best_candidate)) {
+          // printf("[Backup] Best candidate updated to: %d\n", candidate);
           best_candidate = candidate;
         }
       }
