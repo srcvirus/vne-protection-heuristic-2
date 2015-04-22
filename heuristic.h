@@ -19,7 +19,7 @@ bool vector_size_comparator(const std::pair<int, std::vector<int>>& a,
 std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
     const Graph* phys_topology,
     const std::vector<std::vector<int>>& location_constraints,
-    std::pair <int, std::vector<int>> seed) {
+    const std::pair <int, std::vector<int>>& seed) {
   std::unique_ptr<std::vector<std::vector<int>>> node_maps(
       new std::vector<std::vector<int>>(2));
   (*node_maps)[PRIMARY] = std::vector<int>(location_constraints.size(), NIL);
@@ -167,5 +167,29 @@ EmbedVN(Graph* phys_topology, const Graph* virt_topology,
     }
   }
   return std::move(edge_map);
+}
+
+long EmbeddingCost(const Graph* phys_topology, const Graph* virt_topology,
+                  const VNEmbedding* embedding) {
+  long cost = 0;
+  for (auto emap_it = embedding->primary_edge_map->begin(); emap_it != embedding->primary_edge_map->end();
+        ++emap_it) {
+    auto& vlink = emap_it->first;
+    auto& plinks = emap_it->second;
+    for (auto& e : plinks) {
+      cost += phys_topology->get_edge_cost(e.first, e.second) *
+                virt_topology->get_edge_bandwidth(vlink.first, vlink.second);
+    }
+  }
+  for (auto semap_it = embedding->backup_edge_map->begin(); semap_it != embedding->backup_edge_map->end();
+          ++semap_it) {
+    auto& vlink = semap_it->first;
+    auto& plinks = semap_it->second;
+    for (auto& e : plinks) {
+      cost += phys_topology->get_edge_cost(e.first, e.second) *
+                virt_topology->get_edge_bandwidth(vlink.first, vlink.second);
+    }
+  }
+  return cost;
 }
 #endif  // _HEURISTIC_H_

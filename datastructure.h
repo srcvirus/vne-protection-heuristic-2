@@ -115,14 +115,14 @@ class Graph {
     }
   }
 
-  int get_edge_cost(int u, int v) {
+  int get_edge_cost(int u, int v) const {
     auto& neighbors = adj_list_->at(u);
     for (auto& end_point : neighbors) {
       if (end_point.node_id == v) return end_point.cost;
     }
   }
 
-  long get_edge_bandwidth(int u, int v) {
+  long get_edge_bandwidth(int u, int v) const {
     auto& neighbors = adj_list_->at(u);
     for (auto& end_point : neighbors) {
       if (end_point.node_id == v) return end_point.bandwidth;
@@ -144,7 +144,7 @@ class Graph {
     return std::move(edge_list);
   }
 
-  std::string GetDebugString() {
+  std::string GetDebugString() const {
     std::string ret_string = "node_count = " + std::to_string(node_count_);
     ret_string += ", edge_count = " + std::to_string(edge_count_) + "\n";
     for (int i = 0; i < node_count_; ++i) {
@@ -231,7 +231,7 @@ struct VNEmbedding {
     std::vector<std::pair<int,int>>>> primary_edge_map;
   std::unique_ptr<std::map<std::pair<int,int>, 
     std::vector<std::pair<int,int>>>> backup_edge_map;
-  int cost;
+  long cost;
 };
 
 struct ThreadParameter {
@@ -241,5 +241,5 @@ struct ThreadParameter {
   const Graph* phys_topology;
   const Graph* virt_topology;
   const std::vector<std::vector<int>>* location_constraints;
-}
+};
 #endif  // MIDDLEBOX_PLACEMENT_SRC_DATASTRUCTURE_H_
