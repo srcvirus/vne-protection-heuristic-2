@@ -10,7 +10,7 @@
 #include <memory>
 #include <stdlib.h>
 
-#define INF 99999999
+#define INF 999999999
 #define MAXN 1000
 #define NIL -1
 
