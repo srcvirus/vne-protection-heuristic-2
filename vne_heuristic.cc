@@ -117,6 +117,7 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(const Graph* phys_topology, const Grap
   }
   int min_cost_embedding = 0;
   for (int i = 0; i < embeddings.size(); ++i) {
+    printf("Embedding %d cost: %ld\n", i, embeddings[i]->cost);
     if (embeddings[i]->cost < embeddings[min_cost_embedding]->cost) {
       min_cost_embedding = i;
     }
@@ -153,10 +154,9 @@ int main(int argc, char* argv[]) {
       location_constraint_filename.c_str(), virt_topology->node_count());
 
   auto solution_start_time = std::chrono::high_resolution_clock::now();
-
-  auto solution_end_time = std::chrono::high_resolution_clock::now();
   auto embedding = ProtectedVNE(physical_topology.get(), virt_topology.get(),
                                     *location_constraints);
+  auto solution_end_time = std::chrono::high_resolution_clock::now();
   unsigned long long elapsed_time =
       std::chrono::duration_cast<std::chrono::nanoseconds>(
           solution_end_time - solution_start_time).count();
