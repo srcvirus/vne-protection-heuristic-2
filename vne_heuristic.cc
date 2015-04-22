@@ -63,7 +63,8 @@ int main(int argc, char* argv[]) {
   auto partitions = PartitionGraph(physical_topology.get(), node_map.get());
   auto& primary_partition = (*partitions)[PRIMARY];
   auto& backup_partition = (*partitions)[BACKUP];
- 
+  printf("Primary partition size = %lu, backup partition size = %lu\n", primary_partition.size(),
+          backup_partition.size());
   bool edge_map_failed = false;
   auto emap = EmbedVN(physical_topology.get(), virt_topology.get(), primary_partition, primary_node_map);
   for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
