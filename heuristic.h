@@ -5,6 +5,7 @@
 #include "graph_util.h"
 
 #include <algorithm>
+#include <math.h>
 #include <vector>
 #include <utility>
 
@@ -108,6 +109,8 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
     if (!taken[i]) {
       if (!IsFeasiblePartition(phys_topology, primary, backup_seed, i)) {
         backup.push_back(i);
+      } else if (!IsFeasiblePartition(phys_topology, backup, primary_seed, i)) {
+        primary.push_back(i);
       } else {
         int component_decrease_primary =
             NumConnectedComponentsDecrease(phys_topology, primary, i);
@@ -115,16 +118,40 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
             NumConnectedComponentsDecrease(phys_topology, backup, i);
         if (component_decrease_primary > component_decrease_backup) {
           primary.push_back(i);
-        } else if (component_decrease_primary == component_decrease_backup) {
+        } else if (component_decrease_primary < component_decrease_backup) {
+          backup.push_back(i);
+        } else {
           int cut_edge_primary = NumCutEdges(phys_topology, primary, i);
           int cut_edge_backup = NumCutEdges(phys_topology, backup, i);
-          if (cut_edge_primary >= cut_edge_backup) {
+          if (cut_edge_primary > cut_edge_backup) {
             primary.push_back(i);
-          } else {
+          } else if (cut_edge_primary < cut_edge_backup) {
             backup.push_back(i);
+          } else {         
+            if (primary.size() > backup.size()) {
+              backup.push_back(i);
+            } else if (primary.size() < backup.size()) {
+                primary.push_back(i);
+            } else {
+              primary.push_back(i);
+              double new_primary_mean_sp = MeanSubsetShortestPathLength(phys_topology, primary, primary_seed);
+              primary.pop_back();
+              double cur_primary_mean_sp = MeanSubsetShortestPathLength(phys_topology, primary, primary_seed);
+              double primary_sp_reduction = new_primary_mean_sp - cur_primary_mean_sp;
+
+              backup.push_back(i);
+              double new_backup_mean_sp = MeanSubsetShortestPathLength(phys_topology, backup, backup_seed);
+              backup.pop_back();
+              double cur_backup_mean_sp = MeanSubsetShortestPathLength(phys_topology, backup, backup_seed);
+              double backup_sp_reduction = new_backup_mean_sp - cur_backup_mean_sp;
+
+              if (primary_sp_reduction > backup_sp_reduction) {
+                primary.push_back(i);
+              } else {
+                backup.push_back(i);
+              }
+            }
           }
-        } else {
-          backup.push_back(i);
         }
       }
     }

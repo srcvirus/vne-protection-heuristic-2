@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <pthread.h>
+#include <unistd.h>
 
 void* EmbedVNThread(void* args) {
   ThreadParameter* parameter = reinterpret_cast<ThreadParameter*>(args);
@@ -18,6 +19,7 @@ void* EmbedVNThread(void* args) {
   seed.second.emplace_back(parameter->primary_seed);
   seed.second.emplace_back(parameter->backup_seed);
   int cost = 0;
+  VNEmbedding* embedding = new VNEmbedding();
   auto node_map = CreateInitialNodeMap(phys_topology.get(),
                                        *(parameter->location_constraints),
                                        seed);
@@ -38,7 +40,8 @@ void* EmbedVNThread(void* args) {
     if (node_map_failed) break;
   }
   if (node_map_failed) {
-    cost = INF;
+    embedding->cost = INF;
+    pthread_exit(reinterpret_cast<void*>(embedding));
   }
 
   auto& primary_node_map = (*node_map)[PRIMARY];
@@ -46,18 +49,21 @@ void* EmbedVNThread(void* args) {
   auto partitions = PartitionGraph(phys_topology.get(), node_map.get());
   auto& primary_partition = (*partitions)[PRIMARY];
   auto& backup_partition = (*partitions)[BACKUP];
-  printf("Seeds %d, %d, primary partition size = %lu, backup partition size = %lu\n",
-          parameter->primary_seed, parameter->backup_seed, primary_partition.size(),
-          backup_partition.size());
+  // printf("Seeds %d, %d, primary partition size = %lu, backup partition size = %lu\n",
+  //        parameter->primary_seed, parameter->backup_seed, primary_partition.size(),
+  //        backup_partition.size());
   bool edge_map_failed = false;
   auto emap = EmbedVN(phys_topology.get(), virt_topology.get(),
                       primary_partition, primary_node_map);
   for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
     if (emap_it->second.empty()) {
       edge_map_failed = true;
-      cost = INF;
       break;
     }
+  }
+  if (edge_map_failed) {
+    embedding->cost = INF;
+    pthread_exit(reinterpret_cast<void*>(embedding));
   }
 
   auto semap = EmbedVN(phys_topology.get(), virt_topology.get(),
@@ -65,49 +71,70 @@ void* EmbedVNThread(void* args) {
   for (auto semap_it = semap->begin(); semap_it != semap->end(); ++semap_it) {
     if (semap_it->second.empty()) {
       edge_map_failed = true;
-      cost = INF;
       break;
     }
   }
-  VNEmbedding* embedding = new VNEmbedding();
+  if (edge_map_failed) {
+    embedding->cost = INF;
+    pthread_exit(reinterpret_cast<void*>(embedding));
+  }
   embedding->node_map = std::move(node_map);
   embedding->primary_edge_map = std::move(emap);
   embedding->backup_edge_map = std::move(semap);
-  if (cost != INF) cost = EmbeddingCost(phys_topology.get(), virt_topology.get(), embedding);
-  embedding->cost = cost;
+  embedding->cost = EmbeddingCost(phys_topology.get(), virt_topology.get(), embedding);
   pthread_exit(reinterpret_cast<void*>(embedding));
 }
 
 std::unique_ptr<VNEmbedding> ProtectedVNE(const Graph* phys_topology, const Graph* virt_topology,
                   const std::vector<std::vector<int>>& location_constraints) {
-  int min_constraint_size = INF, most_constrained_vnode = NIL;
+  int min_constraint_size = INF;
+  std::vector<int> most_constrained_vnodes;
   for (int i = 0; i < location_constraints.size(); ++i) {
     if (location_constraints[i].size() < min_constraint_size) {
       min_constraint_size = location_constraints[i].size();
-      most_constrained_vnode = i;
     }
   }
-  int n_threads = (min_constraint_size * (min_constraint_size - 1)) / 2;
+  for (int i = 0; i < virt_topology->node_count(); ++i) {
+    if (min_constraint_size == location_constraints[i].size()) {
+      most_constrained_vnodes.emplace_back(i);
+    }
+  }
+  int n_threads = 0;
+  for (auto& constraint : location_constraints) {
+    n_threads += (constraint.size() * (constraint.size() - 1)) / 2;
+  }
   std::vector<pthread_t> threads(n_threads);
   int thread_id = 0;
   std::vector<std::unique_ptr<ThreadParameter>> parameters(n_threads);
   for (auto& parameter : parameters) {
     parameter = std::unique_ptr<ThreadParameter>(new ThreadParameter());
   }
-  for (int i = 0; i < location_constraints[most_constrained_vnode].size();
-       ++i) {
-    for (int j = i + 1; j < location_constraints[most_constrained_vnode].size();
-         ++j) {
-      int primary = location_constraints[most_constrained_vnode][i];
-      int backup = location_constraints[most_constrained_vnode][j];
-      ThreadParameter* parameter = parameters[thread_id].get();
-      parameter->vnode_seed = most_constrained_vnode;
-      parameter->primary_seed = primary;
-      parameter->backup_seed = backup;
-      parameter->phys_topology = phys_topology;
-      parameter->virt_topology = virt_topology;
-      parameter->location_constraints = &location_constraints;
-      pthread_create(&threads[thread_id++], NULL, &EmbedVNThread, parameter);
+  int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
+  int current_core = 0;
+  for (int most_constrained_vnode = 0; most_constrained_vnode < virt_topology->node_count();
+        ++most_constrained_vnode) {
+    for (int i = 0; i < location_constraints[most_constrained_vnode].size();
+         ++i) {
+      for (int j = i + 1; j < location_constraints[most_constrained_vnode].size();
+           ++j) {
+        int primary = location_constraints[most_constrained_vnode][i];
+        int backup = location_constraints[most_constrained_vnode][j];
+        ThreadParameter* parameter = parameters[thread_id].get();
+        parameter->vnode_seed = most_constrained_vnode;
+        parameter->primary_seed = primary;
+        parameter->backup_seed = backup;
+        parameter->phys_topology = phys_topology;
+        parameter->virt_topology = virt_topology;
+        parameter->location_constraints = &location_constraints;
+        cpu_set_t cpu_set;
+        CPU_ZERO(&cpu_set);
+        CPU_SET(current_core, &cpu_set);
+        // printf("Th par, pr_seed = %d, back_seed = %d\n", primary, backup);
+        pthread_create(&threads[thread_id], NULL, &EmbedVNThread, parameter);
+        pthread_setaffinity_np(threads[thread_id], sizeof(cpu_set), &cpu_set);
+        current_core = (current_core + 1) % num_cores;
+        ++thread_id;
+      }
     }
   }
   std::vector<std::unique_ptr<VNEmbedding>> embeddings(n_threads);
@@ -119,7 +146,7 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(const Graph* phys_topology, const Grap
   }
   int min_cost_embedding = 0;
   for (int i = 0; i < embeddings.size(); ++i) {
-    printf("Embedding %d cost: %ld\n", i, embeddings[i]->cost);
+    // printf("Embedding %d cost: %ld\n", i, embeddings[i]->cost);
     if (embeddings[i]->cost < embeddings[min_cost_embedding]->cost) {
       min_cost_embedding = i;
     }
@@ -164,7 +191,7 @@ int main(int argc, char* argv[]) {
           solution_end_time - solution_start_time).count();
   printf("Solution time: %llu.%llus\n", elapsed_time / 1000000000LL,
          elapsed_time % 1000000000LL);
-
+  printf("Optimal cost = %ld\n", embedding->cost);
   // Write node maps to file.
   FILE* nmap_file = fopen((pn_topology_filename + ".nmap").c_str(), "w");
   auto& primary_node_map = (*(embedding->node_map))[PRIMARY];

@@ -128,3 +128,50 @@ bool IsFeasibleBetterAssignment(const Graph* graph, std::vector<int>& partition,
   }
   return false;
 }
+
+std::unique_ptr<std::vector<int>> ShortestPathLengthVector(const Graph* graph, int source, 
+                              const std::vector<int>& destinations,
+                              const std::vector<int>& subset) {
+  std::vector<bool> is_subset(graph->node_count(), false);
+  for (auto& node : subset) is_subset[node] = true;
+  std::queue<int> Q;
+  std::vector<bool> visited(graph->node_count(), false);
+  std::vector<int> distance(graph->node_count(), INF);
+  Q.push(source);
+  distance[source] = 0;
+  while(!Q.empty()) {
+    int u = Q.front();
+    Q.pop();
+    visited[u] = true;
+    auto& neighbors = graph->adj_list()->at(u);
+    for (auto& node : neighbors) {
+      if (!visited[node.node_id] && is_subset[node.node_id]) {
+        Q.push(node.node_id);
+        distance[node.node_id] = distance[u] + 1;
+      }
+    }
+  }
+  std::unique_ptr<std::vector<int>> ret_vector(new std::vector<int>());
+  for (auto& v : destinations) {
+    ret_vector->emplace_back(distance[v]);
+  }
+  return std::move(ret_vector);
+}
+
+double MeanSubsetShortestPathLength(const Graph* graph, 
+                                    const std::vector<int>& partition,
+                                    const std::vector<int>& mapping_subset) {
+  double distance = 0.0;
+  int paths = 0;
+  for (auto& node : mapping_subset) {
+    auto path_vector = ShortestPathLengthVector(graph, node, mapping_subset, partition);
+    for (int i = 0; i < path_vector->size(); ++i) {
+      distance += path_vector->at(i);
+    }
+    paths += path_vector->size();
+  }
+  double mean_path_length = distance / static_cast<double>(paths);
+  return mean_path_length;
+}
+
+
