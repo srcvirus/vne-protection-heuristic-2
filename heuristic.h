@@ -159,14 +159,13 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
   return std::move(partitions);
 }
 
-std::unique_ptr<std::vector<std::pair<int, int>>> EmbedVLink(
+std::vector<std::pair<int, int>> EmbedVLink(
     const Graph* phys_topology, const std::vector<int>& partition, int map_u,
     int map_v, long bw) {
   auto mapped_path = BFS(phys_topology, partition, map_u, map_v, bw);
-  std::unique_ptr<std::vector<std::pair<int, int>>> edge_map(
-      new std::vector<std::pair<int, int>>());
+  std::vector<std::pair<int, int>> edge_map;
   for (int i = 0; i < ((int)mapped_path->size()) - 1; ++i) {
-    edge_map->push_back(
+    edge_map.push_back(
         std::pair<int, int>(mapped_path->at(i), mapped_path->at(i + 1)));
   }
   return std::move(edge_map);
@@ -187,8 +186,8 @@ EmbedVN(Graph* phys_topology, const Graph* virt_topology,
       long bw = vend_point.bandwidth;
       auto emap =
           EmbedVLink(phys_topology, partition, node_map[u], node_map[v], bw);
-      edge_map->insert(std::make_pair(std::pair<int, int>(u, v), *emap));
-      for (auto& e : *emap) {
+      edge_map->insert(std::make_pair(std::pair<int, int>(u, v), std::move(emap)));
+      for (auto& e : emap) {
         phys_topology->reduce_edge_residual_bandwidth(e.first, e.second, bw);
       }
     }

@@ -85,6 +85,59 @@ void* EmbedVNThread(void* args) {
   pthread_exit(reinterpret_cast<void*>(embedding));
 }
 
+void WriteSolutionToFile(const std::string& filename_prefix, const VNEmbedding* embedding) {
+  printf("Optimal cost = %ld\n", embedding->cost);
+  // Write node maps to file.
+  FILE* nmap_file = fopen((filename_prefix + ".nmap").c_str(), "w");
+  auto& primary_node_map = (*(embedding->node_map))[PRIMARY];
+  for (int i = 0; i < primary_node_map.size(); ++i) {
+    fprintf(nmap_file, "Virtual node %d --> physical node %d\n", i,
+            primary_node_map[i]);
+  }
+  fclose(nmap_file);
+
+  // Write shadow nmaps to file.
+  FILE* snmap_file = fopen((filename_prefix + ".snmap").c_str(), "w");
+  auto& backup_node_map = (*(embedding->node_map))[BACKUP];
+  for (int i = 0; i < backup_node_map.size(); ++i) {
+    fprintf(snmap_file, "Shadow virtual node of %d --> physical node %d\n", i,
+            backup_node_map[i]);
+  }
+  fclose(snmap_file);
+
+  // Write edge maps to file.
+  FILE* emap_file = fopen((filename_prefix + ".emap").c_str(), "w");
+  auto& emap = embedding->primary_edge_map;
+  for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
+    auto& vlink = emap_it->first;
+    auto& plinks = emap_it->second;
+    for (auto& e : plinks) {
+      fprintf(emap_file, "Virtual edge (%d, %d) --> physical edge (%d, %d)\n",
+              vlink.first, vlink.second, e.first, e.second);
+    }
+  }
+  fclose(emap_file);
+
+  // Write shadow edge maps to file.
+  FILE* semap_file = fopen((filename_prefix + ".semap").c_str(), "w");
+  auto& semap = embedding->backup_edge_map;
+  for (auto semap_it = semap->begin(); semap_it != semap->end(); ++semap_it) {
+    auto& vlink = semap_it->first;
+    auto& plinks = semap_it->second;
+    for (auto& e : plinks) {
+      fprintf(semap_file,
+              "Shadow virtual edge of (%d, %d) --> physical edge (%d, %d)\n",
+              vlink.first, vlink.second, e.first, e.second);
+    }
+  }
+  fclose(semap_file);
+
+  // Write cost to file.
+  FILE* cost_file = fopen((filename_prefix + ".cost").c_str(), "w");
+  fprintf(cost_file, "%ld\n", embedding->cost);
+  fclose(cost_file);
+}
+
 std::unique_ptr<VNEmbedding> ProtectedVNE(const Graph* phys_topology, const Graph* virt_topology,
                   const std::vector<std::vector<int>>& location_constraints) {
   int min_constraint_size = INF;
@@ -141,8 +194,9 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(const Graph* phys_topology, const Grap
   for (int i = 0; i < n_threads; ++i) {
     void* ret_value;
     pthread_join(threads[i], &ret_value);
-    embeddings[i] =
-        std::unique_ptr<VNEmbedding>(reinterpret_cast<VNEmbedding*>(ret_value));
+    // embeddings[i] =
+    //   std::unique_ptr<VNEmbedding>(reinterpret_cast<VNEmbedding*>(ret_value));
+    embeddings[i] = std::unique_ptr<VNEmbedding>(std::move(reinterpret_cast<VNEmbedding*>(ret_value)));
   }
   int min_cost_embedding = 0;
   for (int i = 0; i < embeddings.size(); ++i) {
@@ -191,56 +245,6 @@ int main(int argc, char* argv[]) {
           solution_end_time - solution_start_time).count();
   printf("Solution time: %llu.%llus\n", elapsed_time / 1000000000LL,
          elapsed_time % 1000000000LL);
-  printf("Optimal cost = %ld\n", embedding->cost);
-  // Write node maps to file.
-  FILE* nmap_file = fopen((pn_topology_filename + ".nmap").c_str(), "w");
-  auto& primary_node_map = (*(embedding->node_map))[PRIMARY];
-  for (int i = 0; i < primary_node_map.size(); ++i) {
-    fprintf(nmap_file, "Virtual node %d --> physical node %d\n", i,
-            primary_node_map[i]);
-  }
-  fclose(nmap_file);
-
-  // Write shadow nmaps to file.
-  FILE* snmap_file = fopen((pn_topology_filename + ".snmap").c_str(), "w");
-  auto& backup_node_map = (*(embedding->node_map))[BACKUP];
-  for (int i = 0; i < backup_node_map.size(); ++i) {
-    fprintf(snmap_file, "Shadow virtual node of %d --> physical node %d\n", i,
-            backup_node_map[i]);
-  }
-  fclose(snmap_file);
-
-  // Write edge maps to file.
-  FILE* emap_file = fopen((pn_topology_filename + ".emap").c_str(), "w");
-  auto& emap = embedding->primary_edge_map;
-  for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
-    auto& vlink = emap_it->first;
-    auto& plinks = emap_it->second;
-    for (auto& e : plinks) {
-      fprintf(emap_file, "Virtual edge (%d, %d) --> physical edge (%d, %d)\n",
-              vlink.first, vlink.second, e.first, e.second);
-    }
-  }
-  fclose(emap_file);
-
-  // Write shadow edge maps to file.
-  FILE* semap_file = fopen((pn_topology_filename + ".semap").c_str(), "w");
-  auto& semap = embedding->backup_edge_map;
-  for (auto semap_it = semap->begin(); semap_it != semap->end(); ++semap_it) {
-    auto& vlink = semap_it->first;
-    auto& plinks = semap_it->second;
-    for (auto& e : plinks) {
-      fprintf(emap_file,
-              "Shadow virtual edge of (%d, %d) --> physical edge (%d, %d)\n",
-              vlink.first, vlink.second, e.first, e.second);
-    }
-  }
-  fclose(semap_file);
-
-  // Write cost to file.
-  FILE* cost_file = fopen((pn_topology_filename + ".cost").c_str(), "w");
-  fprintf(cost_file, "%ld\n", embedding->cost);
-  fclose(cost_file);
-
+  WriteSolutionToFile(pn_topology_filename, embedding.get());
   return 0;
 }
