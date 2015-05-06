@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <math.h>
+#include <stdlib.h>
 #include <vector>
 #include <utility>
 
@@ -20,7 +21,8 @@ bool vector_size_comparator(const std::pair<int, std::vector<int>>& a,
 std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
     const Graph* phys_topology,
     const std::vector<std::vector<int>>& location_constraints,
-    const std::pair <int, std::vector<int>>& seed) {
+    const std::pair<int, std::vector<int>>& seed) {
+  auto tid = pthread_self();
   std::unique_ptr<std::vector<std::vector<int>>> node_maps(
       new std::vector<std::vector<int>>(2));
   (*node_maps)[PRIMARY] = std::vector<int>(location_constraints.size(), NIL);
@@ -45,6 +47,8 @@ std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
   std::vector<bool> taken(phys_topology->node_count(), false);
   taken[seed.second[PRIMARY]] = true;
   taken[seed.second[BACKUP]] = true;
+  primary.push_back(seed.second[PRIMARY]);
+  backup.push_back(seed.second[BACKUP]);
   for (int i = 0; i < temp_loc_constraints.size(); ++i) {
     int vnode = temp_loc_constraints[i].first;
     if (vnode == mapped_node) continue;
@@ -87,6 +91,89 @@ std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
   return std::move(node_maps);
 }
 
+std::unique_ptr<std::vector<std::vector<int>>> ReEmbedVirtualNodes(
+    const Graph* phys_topology,
+    const std::vector<std::vector<int>>& location_constraints,
+    const std::vector<int>& primary, const std::vector<int>& backup,
+    const std::vector<std::vector<int>>& initial_node_map,
+    const std::pair<int, std::vector<int>>& seed) {
+  pthread_t tid = pthread_self();
+  std::unique_ptr<std::vector<std::vector<int>>> node_maps(
+      new std::vector<std::vector<int>>(2));
+  (*node_maps)[PRIMARY] = std::vector<int>(initial_node_map[PRIMARY]);
+  (*node_maps)[BACKUP] = std::vector<int>(initial_node_map[BACKUP]);
+  int mapped_node = seed.first;
+  std::vector<std::pair<int, std::vector<int>>> temp_loc_constraints;
+  for (int i = 0; i < location_constraints.size(); ++i) {
+    temp_loc_constraints.push_back(std::make_pair(i, location_constraints[i]));
+  }
+  // Sort location constraints according to the number of constraints (low to
+  // high).
+  std::sort(temp_loc_constraints.begin(), temp_loc_constraints.end(),
+            vector_size_comparator);
+
+  std::vector<int> partition(phys_topology->node_count(), NIL);
+  for (auto& n : primary) partition[n] = PRIMARY;
+  for (auto& n : backup) partition[n] = BACKUP;
+
+  std::vector<bool> taken(phys_topology->node_count(), false);
+  for (auto& m : *node_maps) {
+    for (auto& n : m) {
+      taken[n] = true;
+    }
+  }
+  for (int i = 0; i < temp_loc_constraints.size(); ++i) {
+    int vnode = temp_loc_constraints[i].first;
+    // printf("[%x] Mapping vnode %d\n", tid, vnode);
+    int best_candidate = (*node_maps)[PRIMARY][vnode];
+    int old_mapping = (*node_maps)[PRIMARY][vnode];
+    for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
+      int candidate = temp_loc_constraints[i].second[j];
+      if (!taken[candidate] && partition[candidate] == PRIMARY) {
+        double mean_sp_old = MeanSubsetShortestPathLength(
+            phys_topology, primary, backup, (*node_maps)[PRIMARY]);
+        (*node_maps)[PRIMARY][vnode] = candidate;
+        double mean_sp_new = MeanSubsetShortestPathLength(
+            phys_topology, primary, backup, (*node_maps)[PRIMARY]);
+        (*node_maps)[PRIMARY][vnode] = old_mapping;
+        if (mean_sp_new < mean_sp_old) {
+          best_candidate = candidate;
+        }
+      }
+    }
+
+    // printf("[%x] Best primary candidate for vnode %d is %d\n", tid, vnode,
+    // best_candidate);
+    (*node_maps)[PRIMARY][vnode] = best_candidate;
+    taken[old_mapping] = false;
+    taken[best_candidate] = true;
+
+    best_candidate = (*node_maps)[BACKUP][vnode];
+    old_mapping = (*node_maps)[BACKUP][vnode];
+    for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
+      int candidate = temp_loc_constraints[i].second[j];
+      if (!taken[candidate] && partition[candidate] == BACKUP) {
+        double mean_sp_old = MeanSubsetShortestPathLength(
+            phys_topology, backup, primary, (*node_maps)[BACKUP]);
+        (*node_maps)[BACKUP][vnode] = candidate;
+        double mean_sp_new = MeanSubsetShortestPathLength(
+            phys_topology, backup, primary, (*node_maps)[BACKUP]);
+        (*node_maps)[BACKUP][vnode] = old_mapping;
+        if (mean_sp_new < mean_sp_old) {
+          best_candidate = candidate;
+        }
+      }
+    }
+
+    // printf("[%x] Best backup candidate for vnode %d is %d\n", tid, vnode,
+    // best_candidate);
+    (*node_maps)[BACKUP][vnode] = best_candidate;
+    taken[old_mapping] = false;
+    taken[best_candidate] = true;
+  }
+  return std::move(node_maps);
+}
+
 std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
     const Graph* phys_topology, std::vector<std::vector<int>>* node_maps) {
   std::unique_ptr<std::vector<std::vector<int>>> partitions(
@@ -112,43 +199,33 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
       } else if (!IsFeasiblePartition(phys_topology, backup, primary_seed, i)) {
         primary.push_back(i);
       } else {
-        int component_decrease_primary =
-            NumConnectedComponentsDecrease(phys_topology, primary, i);
-        int component_decrease_backup =
-            NumConnectedComponentsDecrease(phys_topology, backup, i);
-        if (component_decrease_primary > component_decrease_backup) {
+        double primary_sp_reduction = MeanShortestPathReduction(
+            phys_topology, primary, backup, primary_seed, i);
+        double backup_sp_reduction = MeanShortestPathReduction(
+            phys_topology, backup, primary, backup_seed, i);
+        if (primary_sp_reduction > backup_sp_reduction) {
           primary.push_back(i);
-        } else if (component_decrease_primary < component_decrease_backup) {
-          backup.push_back(i);
         } else {
-          int cut_edge_primary = NumCutEdges(phys_topology, primary, i);
-          int cut_edge_backup = NumCutEdges(phys_topology, backup, i);
-          if (cut_edge_primary > cut_edge_backup) {
+          int component_decrease_primary =
+              NumConnectedComponentsDecrease(phys_topology, primary, i);
+          int component_decrease_backup =
+              NumConnectedComponentsDecrease(phys_topology, backup, i);
+          if (component_decrease_primary > component_decrease_backup) {
             primary.push_back(i);
-          } else if (cut_edge_primary < cut_edge_backup) {
+          } else if (component_decrease_primary < component_decrease_backup) {
             backup.push_back(i);
-          } else {         
-            if (primary.size() > backup.size()) {
-              backup.push_back(i);
-            } else if (primary.size() < backup.size()) {
-                primary.push_back(i);
-            } else {
+          } else {
+            int cut_edge_primary = NumCutEdges(phys_topology, primary, i);
+            int cut_edge_backup = NumCutEdges(phys_topology, backup, i);
+            if (cut_edge_primary > cut_edge_backup) {
               primary.push_back(i);
-              double new_primary_mean_sp = MeanSubsetShortestPathLength(phys_topology, primary, primary_seed);
-              primary.pop_back();
-              double cur_primary_mean_sp = MeanSubsetShortestPathLength(phys_topology, primary, primary_seed);
-              double primary_sp_reduction = new_primary_mean_sp - cur_primary_mean_sp;
-
+            } else if (cut_edge_primary < cut_edge_backup) {
               backup.push_back(i);
-              double new_backup_mean_sp = MeanSubsetShortestPathLength(phys_topology, backup, backup_seed);
-              backup.pop_back();
-              double cur_backup_mean_sp = MeanSubsetShortestPathLength(phys_topology, backup, backup_seed);
-              double backup_sp_reduction = new_backup_mean_sp - cur_backup_mean_sp;
-
-              if (primary_sp_reduction > backup_sp_reduction) {
-                primary.push_back(i);
-              } else {
+            } else {
+              if (primary.size() > backup.size()) {
                 backup.push_back(i);
+              } else {
+                primary.push_back(i);
               }
             }
           }
@@ -159,9 +236,9 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
   return std::move(partitions);
 }
 
-std::vector<std::pair<int, int>> EmbedVLink(
-    const Graph* phys_topology, const std::vector<int>& partition, int map_u,
-    int map_v, long bw) {
+std::vector<std::pair<int, int>> EmbedVLink(const Graph* phys_topology,
+                                            const std::vector<int>& partition,
+                                            int map_u, int map_v, long bw) {
   auto mapped_path = BFS(phys_topology, partition, map_u, map_v, bw);
   std::vector<std::pair<int, int>> edge_map;
   for (int i = 0; i < ((int)mapped_path->size()) - 1; ++i) {
@@ -186,7 +263,8 @@ EmbedVN(Graph* phys_topology, const Graph* virt_topology,
       long bw = vend_point.bandwidth;
       auto emap =
           EmbedVLink(phys_topology, partition, node_map[u], node_map[v], bw);
-      edge_map->insert(std::make_pair(std::pair<int, int>(u, v), std::move(emap)));
+      edge_map->insert(
+          std::make_pair(std::pair<int, int>(u, v), std::move(emap)));
       for (auto& e : emap) {
         phys_topology->reduce_edge_residual_bandwidth(e.first, e.second, bw);
       }
@@ -196,24 +274,24 @@ EmbedVN(Graph* phys_topology, const Graph* virt_topology,
 }
 
 long EmbeddingCost(const Graph* phys_topology, const Graph* virt_topology,
-                  const VNEmbedding* embedding) {
+                   const VNEmbedding* embedding) {
   long cost = 0;
-  for (auto emap_it = embedding->primary_edge_map->begin(); emap_it != embedding->primary_edge_map->end();
-        ++emap_it) {
+  for (auto emap_it = embedding->primary_edge_map->begin();
+       emap_it != embedding->primary_edge_map->end(); ++emap_it) {
     auto& vlink = emap_it->first;
     auto& plinks = emap_it->second;
     for (auto& e : plinks) {
       cost += phys_topology->get_edge_cost(e.first, e.second) *
-                virt_topology->get_edge_bandwidth(vlink.first, vlink.second);
+              virt_topology->get_edge_bandwidth(vlink.first, vlink.second);
     }
   }
-  for (auto semap_it = embedding->backup_edge_map->begin(); semap_it != embedding->backup_edge_map->end();
-          ++semap_it) {
+  for (auto semap_it = embedding->backup_edge_map->begin();
+       semap_it != embedding->backup_edge_map->end(); ++semap_it) {
     auto& vlink = semap_it->first;
     auto& plinks = semap_it->second;
     for (auto& e : plinks) {
       cost += phys_topology->get_edge_cost(e.first, e.second) *
-                virt_topology->get_edge_bandwidth(vlink.first, vlink.second);
+              virt_topology->get_edge_bandwidth(vlink.first, vlink.second);
     }
   }
   return cost;

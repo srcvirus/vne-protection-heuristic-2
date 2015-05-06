@@ -79,7 +79,7 @@ class Graph {
       auto& adj_list = graph.adj_list()->at(i);
       for (auto& neighbor : adj_list) {
         if (i > neighbor.node_id) {
-          this->add_edge(i, neighbor.node_id, neighbor.bandwidth, 
+          this->add_edge(i, neighbor.node_id, neighbor.bandwidth,
                          neighbor.delay, neighbor.cost);
         }
       }
@@ -227,10 +227,10 @@ class DisjointSet {
 
 struct VNEmbedding {
   std::unique_ptr<std::vector<std::vector<int>>> node_map;
-  std::unique_ptr<std::map<std::pair<int,int>, 
-    std::vector<std::pair<int,int>>>> primary_edge_map;
-  std::unique_ptr<std::map<std::pair<int,int>, 
-    std::vector<std::pair<int,int>>>> backup_edge_map;
+  std::unique_ptr<std::map<std::pair<int, int>,
+                           std::vector<std::pair<int, int>>>> primary_edge_map;
+  std::unique_ptr<std::map<std::pair<int, int>,
+                           std::vector<std::pair<int, int>>>> backup_edge_map;
   long cost;
 };
 
