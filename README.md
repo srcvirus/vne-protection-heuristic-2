@@ -1,5 +1,10 @@
 # Heuristic for Virtual Network Embedding with 1 + 1 Network Protection
 
+## System Requirement
+The heuristic is implemented as a multi-threaded program. For better performance
+run the heuristic on a machine with atleast 4 to 8 CPU cores. For best results
+run the program on a machine with 32 or more CPU cores.
+
 ## How to run
 ```
 $ make
