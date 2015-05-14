@@ -8,7 +8,13 @@
 #include <pthread.h>
 #include <unistd.h>
 
+// One thread of execution for a protected virtual network embedding. It takes
+// a pointer to a ThreadParameter object. The ThreadParameter object contains
+// a pointer to a physical network topoogy, a virtual network topology, location
+// constraints, and a seed node mapping. It returns the virtual network
+// embedding .
 void* EmbedVNThread(void* args) {
+  // Extract the Thread parameters.
   ThreadParameter* parameter = reinterpret_cast<ThreadParameter*>(args);
   std::unique_ptr<Graph> phys_topology(new Graph(*(parameter->phys_topology)));
   std::unique_ptr<Graph> virt_topology(new Graph(*(parameter->virt_topology)));
@@ -18,16 +24,12 @@ void* EmbedVNThread(void* args) {
   seed.first = parameter->vnode_seed;
   seed.second.emplace_back(parameter->primary_seed);
   seed.second.emplace_back(parameter->backup_seed);
-  int cost = 0;
   VNEmbedding* embedding = new VNEmbedding();
+  embedding->cost = INF;
+
+  // Find an initial embedding of the virtual nodes.
   auto initial_node_map = CreateInitialNodeMap(
       phys_topology.get(), *(parameter->location_constraints), seed);
-  // for (int i = 0; i < (*node_map)[PRIMARY].size(); ++i)
-  //  printf(" %d", (*node_map)[PRIMARY][i]);
-  // printf("\n");
-  // for (int i = 0; i < (*node_map)[BACKUP].size(); ++i)
-  //   printf(" %d", (*node_map)[BACKUP][i]);
-  // printf("\n");
   bool node_map_failed = false;
   for (auto& m : *initial_node_map) {
     for (auto& n : m) {
@@ -43,6 +45,9 @@ void* EmbedVNThread(void* args) {
     pthread_exit(reinterpret_cast<void*>(embedding));
   }
 
+  // Partition the physical network for primary and backup embedding and then
+  // try to re-embed the virtual nodes according to the obtained partition. The
+  // idea is to improve the node embedding inside the obtained partitions.
   auto partitions = PartitionGraph(phys_topology.get(), initial_node_map.get());
   auto& primary_partition = (*partitions)[PRIMARY];
   auto& backup_partition = (*partitions)[BACKUP];
@@ -55,21 +60,17 @@ void* EmbedVNThread(void* args) {
         node_map_failed = true;
         break;
       }
-    }
+    } 
     if (node_map_failed) break;
   }
   if (node_map_failed) {
-    embedding->cost = INF;
     pthread_exit(reinterpret_cast<void*>(embedding));
   }
   auto& primary_node_map = (*node_map)[PRIMARY];
   auto& backup_node_map = (*node_map)[BACKUP];
-  // printf("Seeds %d, %d, primary partition size = %lu, backup partition size =
-  // %lu\n",
-  //        parameter->primary_seed, parameter->backup_seed,
-  // primary_partition.size(),
-  //        backup_partition.size());
   bool edge_map_failed = false;
+
+  // Primary embedding of virtual links.
   auto emap = EmbedVN(phys_topology.get(), virt_topology.get(),
                       primary_partition, primary_node_map);
   for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
@@ -83,6 +84,7 @@ void* EmbedVNThread(void* args) {
     pthread_exit(reinterpret_cast<void*>(embedding));
   }
 
+  // Backup embedding of virtual links.
   auto semap = EmbedVN(phys_topology.get(), virt_topology.get(),
                        backup_partition, backup_node_map);
   for (auto semap_it = semap->begin(); semap_it != semap->end(); ++semap_it) {
@@ -94,8 +96,8 @@ void* EmbedVNThread(void* args) {
   if (edge_map_failed) {
     embedding->cost = INF;
     pthread_exit(reinterpret_cast<void*>(embedding));
-  }
-  embedding->node_map = std::move(node_map);
+  } 
+  embedding->node_map = std::move(initial_node_map);
   embedding->primary_edge_map = std::move(emap);
   embedding->backup_edge_map = std::move(semap);
   embedding->cost =
@@ -103,6 +105,8 @@ void* EmbedVNThread(void* args) {
   pthread_exit(reinterpret_cast<void*>(embedding));
 }
 
+// Takes a virtual network embedding object pointer and writes various
+// data to a file whose name is prefixed by filename_prefix. 
 void WriteSolutionToFile(const std::string& filename_prefix,
                          const VNEmbedding* embedding) {
   printf("Cost = %ld\n", embedding->cost);
@@ -158,6 +162,13 @@ void WriteSolutionToFile(const std::string& filename_prefix,
   fclose(cost_file);
 }
 
+// This function takes a physical topology, a virtual topology and
+// location constraints and returns a pointer to a VNEmbedding 
+// object. This function creates the all possible initial seed 
+// mappings and spawns worker threads to compute a whole embedding
+// based on the seed node mapping. This function finally aggregates
+// results from the worker threads and returns the best obtained 
+// embedding.
 std::unique_ptr<VNEmbedding> ProtectedVNE(
     const Graph* phys_topology, const Graph* virt_topology,
     const std::vector<std::vector<int>>& location_constraints) {
@@ -173,12 +184,14 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(
       most_constrained_vnodes.emplace_back(i);
     }
   }
-  int n_threads = most_constrained_vnodes.size() *
-                  ((min_constraint_size * (min_constraint_size - 1)) / 2);
-  // int n_threads = 0;
-  // for (auto& constraint : location_constraints) {
-  //   n_threads += (constraint.size() * (constraint.size() - 1)) / 2;
-  //}
+  // int n_threads = most_constrained_vnodes.size() *
+  //                ((min_constraint_size * (min_constraint_size - 1)) / 2);
+  // Spawn a thread for each of the virtual node that is considered first for
+  // mapping.
+  int n_threads = 0;
+  for (auto& constraint : location_constraints) {
+     n_threads += (constraint.size() * (constraint.size() - 1)) / 2;
+  }
   std::vector<pthread_t> threads(n_threads);
   int thread_id = 0;
   std::vector<std::unique_ptr<ThreadParameter>> parameters(n_threads);
@@ -187,9 +200,12 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(
   }
   int num_cores = sysconf(_SC_NPROCESSORS_ONLN);
   int current_core = 0;
-  for (auto& most_constrained_vnode : most_constrained_vnodes) {
-    // for (int most_constrained_vnode = 0; most_constrained_vnode <
-    //  virt_topology->node_count(); ++most_constrained_vnode) {
+  // for (auto& most_constrained_vnode : most_constrained_vnodes) {
+
+  // Consider each virtual node as a first node to map and consider all pair
+  // of primary, backup mapping for this virtual node in consideration.
+  for (int most_constrained_vnode = 0; most_constrained_vnode <
+    virt_topology->node_count(); ++most_constrained_vnode) {
     for (int i = 0; i < location_constraints[most_constrained_vnode].size();
          ++i) {
       for (int j = i + 1;
@@ -206,7 +222,8 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(
         cpu_set_t cpu_set;
         CPU_ZERO(&cpu_set);
         CPU_SET(current_core, &cpu_set);
-        // printf("Th par, pr_seed = %d, back_seed = %d\n", primary, backup);
+        // Create a worker thread and assign it a CPU core in a round robin
+        // basis.
         pthread_create(&threads[thread_id], NULL, &EmbedVNThread, parameter);
         pthread_setaffinity_np(threads[thread_id], sizeof(cpu_set), &cpu_set);
         current_core = (current_core + 1) % num_cores;
@@ -223,7 +240,6 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(
   }
   int min_cost_embedding = 0;
   for (int i = 0; i < embeddings.size(); ++i) {
-    // printf("Embedding %d cost: %ld\n", i, embeddings[i]->cost);
     if (embeddings[i]->cost < embeddings[min_cost_embedding]->cost) {
       min_cost_embedding = i;
     }

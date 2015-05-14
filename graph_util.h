@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <queue>
 
+// Perform a BFS search from src to dest on graph within set partition.
+// Discard links with bandwidth < bw. Returns the path from src to dest
+// as a pointer to vector.
 std::unique_ptr<std::vector<int>> BFS(const Graph* graph,
                                       const std::vector<int>& partition,
                                       int src, int dest, long bw) {
@@ -41,12 +44,11 @@ std::unique_ptr<std::vector<int>> BFS(const Graph* graph,
   return std::move(path);
 }
 
+// Returns the reduction in number of components when candidate_node
+// is added to the nodes in subset in graph.
 int NumConnectedComponentsDecrease(const Graph* graph,
                                    const std::vector<int>& subset,
                                    int candidate_node) {
-  // // printf("subset:");
-  // for (int a : subset) // printf(" %d", a);
-  // // printf("\n");
   std::vector<bool> is_subset_member(graph->node_count(), false);
   for (auto& node : subset) is_subset_member[node] = true;
   DisjointSet ds(graph->node_count(), subset);
@@ -57,7 +59,6 @@ int NumConnectedComponentsDecrease(const Graph* graph,
       ds.Union(node, adj_node.node_id);
     }
   }
-  // ds.Print();
   int current_connected_components = ds.CountDistinct();
   ds.AddValidElement(candidate_node);
   auto& adj_list = graph->adj_list()->at(candidate_node);
@@ -65,13 +66,11 @@ int NumConnectedComponentsDecrease(const Graph* graph,
     if (!is_subset_member[node.node_id]) continue;
     ds.Union(candidate_node, node.node_id);
   }
-  // ds.Print();
   int future_connected_components = ds.CountDistinct();
-  // // printf("current = %d, future = %d\n", current_connected_components,
-  //        future_connected_components);
   return current_connected_components - future_connected_components;
 }
 
+// Returns number of links incident to nodes in partition in graph from node.
 int NumCutEdges(const Graph* graph, const std::vector<int>& partition,
                 int node) {
   int num_cut_edges = 0;
@@ -97,14 +96,15 @@ bool IsFeasiblePartition(const Graph* graph,
     auto& adj_list = graph->adj_list()->at(i);
     for (auto& neighbor : adj_list) {
       if (is_partition_a[i] || is_partition_a[neighbor.node_id]) continue;
-      // // printf("Merging %d and %d\n", i, neighbor.node_id);
       ds.Union(i, neighbor.node_id);
     }
   }
-  // ds.Print();
   return ds.CountDistinct() <= 1;
 }
 
+// Given a source node and a set of destinations, this function returns a vector
+// containing length of shortest path from node to all destinations in graph
+// confined withing nodes in subset and avoiding nodes in forbidden.
 std::unique_ptr<std::vector<int>> ShortestPathLengthVector(
     const Graph* graph, int source, const std::vector<int>& destinations,
     const std::vector<int>& subset, const std::vector<int>& forbidden) {
@@ -124,7 +124,6 @@ std::unique_ptr<std::vector<int>> ShortestPathLengthVector(
     auto& neighbors = graph->adj_list()->at(u);
     for (auto& node : neighbors) {
       if (!visited[node.node_id] && !is_forbidden[node.node_id]) {
-        // if (!visited[node.node_id] && is_subset[node.node_id]) {
         Q.push(node.node_id);
         distance[node.node_id] = distance[u] + 1;
       }
@@ -134,17 +133,18 @@ std::unique_ptr<std::vector<int>> ShortestPathLengthVector(
   for (auto& v : destinations) {
     ret_vector->emplace_back(distance[v]);
   }
-  // printf("ret_vector->size() = %d\n", ret_vector->size());
   return std::move(ret_vector);
 }
 
+// Returns mean shortest path length between vertices in partition while
+// avoiding verticesin forbidden under a given virtual network node mapping in
+// graph.
 double MeanSubsetShortestPathLength(const Graph* graph,
                                     const std::vector<int>& partition,
                                     const std::vector<int>& forbidden,
                                     const std::vector<int>& mapping_subset) {
   double distance = 0.0;
   int paths = 0;
-  // printf("mapping_subset.size() = %d\n", mapping_subset.size());
   for (auto& node : mapping_subset) {
     auto path_vector = ShortestPathLengthVector(graph, node, mapping_subset,
                                                 partition, forbidden);
@@ -153,7 +153,6 @@ double MeanSubsetShortestPathLength(const Graph* graph,
     }
     paths += path_vector->size();
   }
-  // printf("paths = %d\n", paths);
   double mean_path_length = distance / static_cast<double>(paths);
   return mean_path_length;
 }
@@ -196,7 +195,6 @@ bool IsFeasibleBetterAssignment(const Graph* graph, std::vector<int>& partition,
                                 const std::vector<int>& forbidden,
                                 int candidate, int best_candidate) {
   if (!IsFeasiblePartition(graph, partition, forbidden, candidate)) {
-    // printf("Not feasible to assign %d\n", candidate);
     return false;
   }
   if (best_candidate == NIL) return true;
@@ -209,22 +207,12 @@ bool IsFeasibleBetterAssignment(const Graph* graph, std::vector<int>& partition,
         NumConnectedComponentsDecrease(graph, partition, candidate);
     int component_decrease_best =
         NumConnectedComponentsDecrease(graph, partition, best_candidate);
-    // printf("candidate = %d, best = %d, decr_cur = %d, dec_best = %d\n",
-    // candidate, best_candidate,
-    // component_decrease_current, component_decrease_best);
     if (component_decrease_current > component_decrease_best) {
-      // printf("Candidate %d has better connectivity than best %d\n",
-      // candidate, best_candidate);
       return true;
     } else if (component_decrease_current == component_decrease_best) {
       int cut_edge_candidate = NumCutEdges(graph, partition, candidate);
       int cut_edge_current = NumCutEdges(graph, partition, best_candidate);
-      // printf("candidate = %d, best = %d, cut_cur = %d, cut_best = %d\n",
-      // candidate, best_candidate,
-      //   cut_edge_candidate, cut_edge_current);
       if (cut_edge_candidate > cut_edge_current) {
-        // printf("Candidate %d has more cut edges than best %d\n", candidate,
-        // best_candidate);
         return true;
       } else {
         return false;

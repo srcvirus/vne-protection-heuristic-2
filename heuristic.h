@@ -18,6 +18,12 @@ bool vector_size_comparator(const std::pair<int, std::vector<int>>& a,
   return a.second.size() < b.second.size();
 }
 
+// Takes a physical network graph phys_topology, a set of location constraints
+// location_constraints, and a seed mapping of virtual nodes and returns a
+// vector containing exactly two vectors. Each of the vectors in the returned
+// vector contains a mapping of the virtual nodes. The 0-th vector represents
+// the primary node mapping and the 1-th vector represents the backup node
+// mapping, respectively. 
 std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
     const Graph* phys_topology,
     const std::vector<std::vector<int>>& location_constraints,
@@ -52,15 +58,14 @@ std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
   for (int i = 0; i < temp_loc_constraints.size(); ++i) {
     int vnode = temp_loc_constraints[i].first;
     if (vnode == mapped_node) continue;
-    // printf("Mapping vnode %d\n", vnode);
     int best_candidate = NIL;
     for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
       int candidate = temp_loc_constraints[i].second[j];
-      // printf("[Primary] Current candidate: %d\n", candidate);
       if (!taken[candidate]) {
+        // Try a number of tests on the candidate node and determine if it is a
+        // better fit compared to the best_candidate.
         if (IsFeasibleBetterAssignment(phys_topology, primary, backup,
                                        candidate, best_candidate)) {
-          // printf("[Primary] Best candidate updated to: %d\n", candidate);
           best_candidate = candidate;
         }
       }
@@ -70,14 +75,14 @@ std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
       (*node_maps)[PRIMARY][vnode] = best_candidate;
       primary.push_back(best_candidate);
     }
+
+    // Do the same to find backup node mapping.
     best_candidate = NIL;
     for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
       int candidate = temp_loc_constraints[i].second[j];
-      // printf("[Backup] Current candidate: %d\n", candidate);
       if (!taken[candidate]) {
         if (IsFeasibleBetterAssignment(phys_topology, backup, primary,
                                        candidate, best_candidate)) {
-          // printf("[Backup] Best candidate updated to: %d\n", candidate);
           best_candidate = candidate;
         }
       }
@@ -91,6 +96,13 @@ std::unique_ptr<std::vector<std::vector<int>>> CreateInitialNodeMap(
   return std::move(node_maps);
 }
 
+// Given a physical topology phys_topology, a set of location constraints for
+// virtual nodes location_constraints, vectors primary and backup containing the
+// nodes in the primary and backup mapping, respectively, an initial node
+// mapping and a seed node mapping, this function re-embeds the virtual nodes
+// inside the primary and backup mapping to obtain a more optimized node
+// mapping. The return type is a vector of vectors, where each vector contains
+// a one to one mapping between a virtual and physical node.
 std::unique_ptr<std::vector<std::vector<int>>> ReEmbedVirtualNodes(
     const Graph* phys_topology,
     const std::vector<std::vector<int>>& location_constraints,
@@ -124,9 +136,12 @@ std::unique_ptr<std::vector<std::vector<int>>> ReEmbedVirtualNodes(
   }
   for (int i = 0; i < temp_loc_constraints.size(); ++i) {
     int vnode = temp_loc_constraints[i].first;
-    // printf("[%x] Mapping vnode %d\n", tid, vnode);
     int best_candidate = (*node_maps)[PRIMARY][vnode];
     int old_mapping = (*node_maps)[PRIMARY][vnode];
+    // For each virtual node iterate over its location constraint set and check
+    // if any other candidate inside the current partition can yield a "better"
+    // node mapping. Better in this case is computed as the mean shortest path
+    // between the physical nodes belonging to a mapping.
     for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
       int candidate = temp_loc_constraints[i].second[j];
       if (!taken[candidate] && partition[candidate] == PRIMARY) {
@@ -142,12 +157,11 @@ std::unique_ptr<std::vector<std::vector<int>>> ReEmbedVirtualNodes(
       }
     }
 
-    // printf("[%x] Best primary candidate for vnode %d is %d\n", tid, vnode,
-    // best_candidate);
     (*node_maps)[PRIMARY][vnode] = best_candidate;
     taken[old_mapping] = false;
     taken[best_candidate] = true;
 
+    // Perform the similar tasks for backup nodes.
     best_candidate = (*node_maps)[BACKUP][vnode];
     old_mapping = (*node_maps)[BACKUP][vnode];
     for (int j = 0; j < temp_loc_constraints[i].second.size(); ++j) {
@@ -164,9 +178,6 @@ std::unique_ptr<std::vector<std::vector<int>>> ReEmbedVirtualNodes(
         }
       }
     }
-
-    // printf("[%x] Best backup candidate for vnode %d is %d\n", tid, vnode,
-    // best_candidate);
     (*node_maps)[BACKUP][vnode] = best_candidate;
     taken[old_mapping] = false;
     taken[best_candidate] = true;
@@ -174,6 +185,12 @@ std::unique_ptr<std::vector<std::vector<int>>> ReEmbedVirtualNodes(
   return std::move(node_maps);
 }
 
+
+// Based on a primary and backup node mapping, node_maps[0] and node_maps[1],
+// respectively, partitions the physical network phys_topology into two disjoint
+// partitions. The return type is a vector of vector, where the 0-th vector
+// contains the primary and the 1-th vector contains the backup partitoin,
+// respectively.
 std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
     const Graph* phys_topology, std::vector<std::vector<int>>* node_maps) {
   std::unique_ptr<std::vector<std::vector<int>>> partitions(
@@ -182,6 +199,7 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
   auto& primary = partitions->at(PRIMARY);
   auto& backup = partitions->at(BACKUP);
   std::vector<int> primary_seed, backup_seed;
+  // The node mappings are seed for the primary and backup partitions.
   for (auto& node : node_maps->at(PRIMARY)) {
     primary.push_back(node);
     primary_seed.push_back(node);
@@ -194,11 +212,13 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
   }
   for (int i = 0; i < phys_topology->node_count(); ++i) {
     if (!taken[i]) {
+      // Feasibility Test.
       if (!IsFeasiblePartition(phys_topology, primary, backup_seed, i)) {
         backup.push_back(i);
       } else if (!IsFeasiblePartition(phys_topology, backup, primary_seed, i)) {
         primary.push_back(i);
       } else {
+        // Compact Partition Test.
         double primary_sp_reduction = MeanShortestPathReduction(
             phys_topology, primary, backup, primary_seed, i);
         double backup_sp_reduction = MeanShortestPathReduction(
@@ -206,6 +226,9 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
         if (primary_sp_reduction > backup_sp_reduction) {
           primary.push_back(i);
         } else {
+          // Connectivity Contribution Test.
+          // First check how much contribution is made in terms of reduction in
+          // number of components.
           int component_decrease_primary =
               NumConnectedComponentsDecrease(phys_topology, primary, i);
           int component_decrease_backup =
@@ -215,6 +238,8 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
           } else if (component_decrease_primary < component_decrease_backup) {
             backup.push_back(i);
           } else {
+            // Then check how many edges from the candidate is incident to the
+            // primary and backup partitions, respectively.
             int cut_edge_primary = NumCutEdges(phys_topology, primary, i);
             int cut_edge_backup = NumCutEdges(phys_topology, backup, i);
             if (cut_edge_primary > cut_edge_backup) {
@@ -222,6 +247,7 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
             } else if (cut_edge_primary < cut_edge_backup) {
               backup.push_back(i);
             } else {
+              // In case of a tie on previous criteria, balance the partitions.
               if (primary.size() > backup.size()) {
                 backup.push_back(i);
               } else {
@@ -236,6 +262,9 @@ std::unique_ptr<std::vector<std::vector<int>>> PartitionGraph(
   return std::move(partitions);
 }
 
+// Given the mapped endpoints of a virtual link map_u, and map_v and a bandwidth
+// requirement bw, this function embeds the virtul link on the shortest path
+// between map_u and map_v located within partition and having bandwidth bw.
 std::vector<std::pair<int, int>> EmbedVLink(const Graph* phys_topology,
                                             const std::vector<int>& partition,
                                             int map_u, int map_v, long bw) {
@@ -248,6 +277,7 @@ std::vector<std::pair<int, int>> EmbedVLink(const Graph* phys_topology,
   return std::move(edge_map);
 }
 
+// Embed all the virtual links and return the graph embedding.
 std::unique_ptr<std::map<std::pair<int, int>, std::vector<std::pair<int, int>>>>
 EmbedVN(Graph* phys_topology, const Graph* virt_topology,
         const std::vector<int>& partition, const std::vector<int>& node_map) {
@@ -273,6 +303,7 @@ EmbedVN(Graph* phys_topology, const Graph* virt_topology,
   return std::move(edge_map);
 }
 
+// Compute the cost of an embedding.
 long EmbeddingCost(const Graph* phys_topology, const Graph* virt_topology,
                    const VNEmbedding* embedding) {
   long cost = 0;
