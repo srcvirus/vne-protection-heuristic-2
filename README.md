@@ -5,6 +5,14 @@ The heuristic is implemented as a multi-threaded program. For better performance
 run the heuristic on a machine with atleast 4 to 8 CPU cores. For best results
 run the program on a machine with 32 or more CPU cores.
 
+## File Organization
+  * datastructure.h: Contains definition of data structures used in different
+    parts of the code.
+  * graph_utils.h: Contains helper functions for performing different graph
+    operations.
+  * heuristic.h: Contains functions for performing different heuristic steps.
+  * vne_heuristic.cc: The file containing the main function. The worker threads
+    and the thread creation functions are also defined in this file.
 ## How to run
 ```
 $ make
