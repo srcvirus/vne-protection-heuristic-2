@@ -59,16 +59,16 @@ std::unique_ptr<Graph> InitializeTopologyFromFile(const char *filename) {
     auto &row = csv_vector->at(i);
 
     // Each line has the following format:
-    // LinkID, SourceID, DestinationID, PeerID, Cost, Bandwidth, Delay.
+    // LinkID, SourceID, DestinationID, PeerID, Cost, Channels, Delay.
     int u = atoi(row[1].c_str());
     int v = atoi(row[2].c_str());
     int cost = atoi(row[4].c_str());
-    long bw = atol(row[5].c_str());
+    int ch = atol(row[5].c_str());
     int delay = atoi(row[6].c_str());
 
-    DEBUG("Line[%d]: u = %d, v = %d, cost = %d, bw = %ld, delay = %d\n", i, u,
-          v, cost, bw, delay);
-    graph->add_edge(u, v, bw, delay, cost);
+    DEBUG("Line[%d]: u = %d, v = %d, cost = %d, bw = %d, delay = %d\n", i, u, v,
+          cost, ch, delay);
+    graph->add_edge(u, v, ch, delay, cost);
   }
   return std::move(graph);
 }

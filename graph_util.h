@@ -5,7 +5,7 @@
 #include <queue>
 
 // Perform a BFS search from src to dest on graph within set partition.
-// Discard links with bandwidth < bw. Returns the path from src to dest
+// Discard links with channels < bw. Returns the path from src to dest
 // as a pointer to vector.
 std::unique_ptr<std::vector<int>> BFS(const Graph* graph,
                                       const std::vector<int>& partition,
@@ -26,7 +26,7 @@ std::unique_ptr<std::vector<int>> BFS(const Graph* graph,
     for (auto& end_point : u_neighbors) {
       int v = end_point.node_id;
       if (!visited[v] && in_partition[u] && in_partition[v] &&
-          end_point.residual_bandwidth >= bw) {
+          end_point.residual_channels >= bw) {
         Q.push(v);
         pre[v] = u;
         if (v == dest) break;
@@ -42,6 +42,63 @@ std::unique_ptr<std::vector<int>> BFS(const Graph* graph,
   if (!path->empty()) path->push_back(node);
   std::reverse(path->begin(), path->end());
   return std::move(path);
+}
+
+std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
+    const Graph* graph,
+    const std::vector<int>& partition,
+    int src, int dest, int ch) {
+  const int kNodeCount = graph->node_count();
+  std::vector<bool> in_partition(kNodeCount, false);
+  for (auto& node : partition) in_partition[node] = true;
+  int ch_lo = 0, ch_hi = 6;
+  std::unique_ptr<std::pair<int,std::unique_ptr<std::vector<int>>>> dwdm_path(
+      new std::pair<int, std::unique_ptr<std::vector<int>>>());
+  dwdm_path->first = NIL;
+  dwdm_path->second = std::unique_ptr<std::vector<int>>(new std::vector<int>());
+  while(ch_lo < ch_hi) {
+    int ch_mid = (ch_lo + ch_hi) / 2;
+    std::queue<int> Q;
+    std::vector<bool> visited(kNodeCount, false);
+    std::vector<int> pre(kNodeCount, NIL);
+    Q.push(src);
+    visited[src] = true;
+    while(!Q.empty()) {
+      int u = Q.front();
+      Q.pop();
+      visited[u] = true;
+      auto& u_neighbors = graph->adj_list()->at(u);
+      for (auto& end_point : u_neighbors) {
+        int v = end_point.node_id;
+        bool has_valid_channel = (end_point.available_channels.find(ch_mid) 
+            != end_point.available_channels.end());
+        if (has_valid_channel && !visited[v] && in_partition[u] && 
+            in_partition[v] && end_point.residual_channels >= ch) {
+          Q.push(v);
+          pre[v] = u;
+          if (v == dest) break;
+        }
+      }
+    }
+    if (visited[dest]) {
+      DEBUG("Success for channel: %d\n", ch_mid);
+      ch_hi = ch_mid;
+      int node = dest;
+      dwdm_path->first = ch_hi;
+      std::vector<int>* path = dwdm_path->second.get();
+      path->clear();
+      while(pre[node] != NIL) {
+        path->push_back(node);
+        node = pre[node];
+      }
+      DEBUG("path->size() = %d\n", path->size());
+      if (!path->empty()) path->push_back(node);
+      std::reverse(path->begin(), path->end());
+    } else {
+      ch_lo = ch_mid + 1;
+    }
+  }
+  return std::move(dwdm_path);
 }
 
 // Returns the reduction in number of components when candidate_node

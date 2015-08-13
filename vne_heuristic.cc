@@ -60,7 +60,7 @@ void* EmbedVNThread(void* args) {
         node_map_failed = true;
         break;
       }
-    } 
+    }
     if (node_map_failed) break;
   }
   if (node_map_failed) {
@@ -74,7 +74,9 @@ void* EmbedVNThread(void* args) {
   auto emap = EmbedVN(phys_topology.get(), virt_topology.get(),
                       primary_partition, primary_node_map);
   for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
-    if (emap_it->second.empty()) {
+    if (emap_it->second.second.empty()) {
+      DEBUG("Mapping of vlink (%d, %d) failed\n", 
+          emap_it->first.first, emap_it->first.second);
       edge_map_failed = true;
       break;
     }
@@ -88,7 +90,9 @@ void* EmbedVNThread(void* args) {
   auto semap = EmbedVN(phys_topology.get(), virt_topology.get(),
                        backup_partition, backup_node_map);
   for (auto semap_it = semap->begin(); semap_it != semap->end(); ++semap_it) {
-    if (semap_it->second.empty()) {
+    if (semap_it->second.second.empty()) {
+      DEBUG("Mapping of shadow vlink (%d, %d) failed\n", 
+          semap_it->first.first, semap_it->first.second);
       edge_map_failed = true;
       break;
     }
@@ -96,7 +100,7 @@ void* EmbedVNThread(void* args) {
   if (edge_map_failed) {
     embedding->cost = INF;
     pthread_exit(reinterpret_cast<void*>(embedding));
-  } 
+  }
   embedding->node_map = std::move(initial_node_map);
   embedding->primary_edge_map = std::move(emap);
   embedding->backup_edge_map = std::move(semap);
@@ -106,7 +110,7 @@ void* EmbedVNThread(void* args) {
 }
 
 // Takes a virtual network embedding object pointer and writes various
-// data to a file whose name is prefixed by filename_prefix. 
+// data to a file whose name is prefixed by filename_prefix.
 void WriteSolutionToFile(const std::string& filename_prefix,
                          const VNEmbedding* embedding) {
   printf("Cost = %ld\n", embedding->cost);
@@ -134,10 +138,12 @@ void WriteSolutionToFile(const std::string& filename_prefix,
   auto& emap = embedding->primary_edge_map;
   for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
     auto& vlink = emap_it->first;
-    auto& plinks = emap_it->second;
+    int channel_index = emap_it->second.first;
+    auto& plinks = emap_it->second.second;
     for (auto& e : plinks) {
-      fprintf(emap_file, "Virtual edge (%d, %d) --> physical edge (%d, %d)\n",
-              vlink.first, vlink.second, e.first, e.second);
+      fprintf(emap_file,
+              "Virtual edge (%d, %d) --> physical edge (%d, %d), channel: %d\n",
+              vlink.first, vlink.second, e.first, e.second, channel_index);
     }
   }
   fclose(emap_file);
@@ -147,11 +153,13 @@ void WriteSolutionToFile(const std::string& filename_prefix,
   auto& semap = embedding->backup_edge_map;
   for (auto semap_it = semap->begin(); semap_it != semap->end(); ++semap_it) {
     auto& vlink = semap_it->first;
-    auto& plinks = semap_it->second;
+    int channel_index = semap_it->second.first;
+    auto& plinks = semap_it->second.second;
     for (auto& e : plinks) {
       fprintf(semap_file,
-              "Shadow virtual edge of (%d, %d) --> physical edge (%d, %d)\n",
-              vlink.first, vlink.second, e.first, e.second);
+              "Shadow virtual edge of (%d, %d) --> physical edge (%d, %d), "
+              "channel: %d\n",
+              vlink.first, vlink.second, e.first, e.second, channel_index);
     }
   }
   fclose(semap_file);
@@ -163,11 +171,11 @@ void WriteSolutionToFile(const std::string& filename_prefix,
 }
 
 // This function takes a physical topology, a virtual topology and
-// location constraints and returns a pointer to a VNEmbedding 
-// object. This function creates the all possible initial seed 
+// location constraints and returns a pointer to a VNEmbedding
+// object. This function creates the all possible initial seed
 // mappings and spawns worker threads to compute a whole embedding
 // based on the seed node mapping. This function finally aggregates
-// results from the worker threads and returns the best obtained 
+// results from the worker threads and returns the best obtained
 // embedding.
 std::unique_ptr<VNEmbedding> ProtectedVNE(
     const Graph* phys_topology, const Graph* virt_topology,
@@ -190,7 +198,7 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(
   // mapping.
   int n_threads = 0;
   for (auto& constraint : location_constraints) {
-     n_threads += (constraint.size() * (constraint.size() - 1)) / 2;
+    n_threads += (constraint.size() * (constraint.size() - 1)) / 2;
   }
   std::vector<pthread_t> threads(n_threads);
   int thread_id = 0;
@@ -204,8 +212,9 @@ std::unique_ptr<VNEmbedding> ProtectedVNE(
 
   // Consider each virtual node as a first node to map and consider all pair
   // of primary, backup mapping for this virtual node in consideration.
-  for (int most_constrained_vnode = 0; most_constrained_vnode <
-    virt_topology->node_count(); ++most_constrained_vnode) {
+  for (int most_constrained_vnode = 0;
+       most_constrained_vnode < virt_topology->node_count();
+       ++most_constrained_vnode) {
     for (int i = 0; i < location_constraints[most_constrained_vnode].size();
          ++i) {
       for (int j = i + 1;

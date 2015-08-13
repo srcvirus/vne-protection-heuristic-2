@@ -2,6 +2,7 @@
 #define DATASTRUCTURE_H_
 
 #include <list>
+#include <set>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -17,50 +18,59 @@
 class Edge {
  public:
   Edge() {}
-  Edge(int u, int v, long bandwidth, int cost)
-      : u_(u), v_(v), bandwidth_(bandwidth), cost_(cost) {}
+  Edge(int u, int v, int channels, int cost)
+      : u_(u), v_(v), channels_(channels), cost_(cost) {}
 
   int u() const { return u_; }
   int v() const { return v_; }
-  long bandwidth() const { return bandwidth_; }
+  int channels() const { return channels_; }
   int cost() const { return cost_; }
 
   bool operator<(const Edge& e) const {
-    if (bandwidth_ != e.bandwidth_)
-      return bandwidth_ < e.bandwidth_;
+    if (channels_ != e.channels_)
+      return channels_ < e.channels_;
     else
       return (u_ <= e.u_ || v_ <= e.v_);
   }
   bool operator==(const Edge& e) const { return u_ == e.u_ && v_ == e.v_; }
   std::string GetDebugString() {
     return "[u = " + std::to_string(u_) + ", v = " + std::to_string(v_) +
-           ", bandwidth = " + std::to_string(bandwidth_) + "]";
+           ", channels = " + std::to_string(channels_) + "]";
   }
 
  private:
   int u_, v_;
-  long bandwidth_, cost_;
+  int channels_, cost_;
 };
 
 // An entry in an adjacent list. An entry contains the node_id of the endpoint.
-// The entry contains bandwidth, residual bandwidth, delay and cost of the
+// The entry contains channels, residual channels, delay and cost of the
 // corresponding edge.
 struct edge_endpoint {
   int node_id;
-  long bandwidth;
-  long residual_bandwidth;
-  int delay;
-  int cost;
-  edge_endpoint(int node_id, long bw, int delay, int cost)
+  int channels, residual_channels;
+  int delay, cost;
+  std::set<int> available_channels;
+  edge_endpoint(int node_id, int ch, int delay, int cost)
       : node_id(node_id),
-        bandwidth(bw),
+        channels(ch),
         delay(delay),
-        residual_bandwidth(bw),
-        cost(cost) {}
+        residual_channels(ch),
+        cost(cost) {
+    available_channels.clear();
+    for (int i = 0; i < channels; ++i) available_channels.insert(i);
+  }
   std::string GetDebugString() {
-    return "ndoe_id = " + std::to_string(node_id) + ", bandwidth = " +
-           std::to_string(bandwidth) + ", delay = " + std::to_string(delay) +
-           ", cost = " + std::to_string(cost);
+    std::string str_available_channels = "[";
+    for (auto ch_it = available_channels.begin();
+         ch_it != available_channels.end(); ++ch_it) {
+      str_available_channels += " ";
+      str_available_channels += std::to_string(*ch_it);
+    }
+    return "ndoe_id = " + std::to_string(node_id) + ", channels = " +
+           std::to_string(channels) + ", delay = " + std::to_string(delay) +
+           ", cost = " + std::to_string(cost) + ", available_channels = " +
+           str_available_channels;
   }
 };
 
@@ -79,8 +89,8 @@ class Graph {
       auto& adj_list = graph.adj_list()->at(i);
       for (auto& neighbor : adj_list) {
         if (i > neighbor.node_id) {
-          this->add_edge(i, neighbor.node_id, neighbor.bandwidth,
-                         neighbor.delay, neighbor.cost);
+          this->add_edge(i, neighbor.node_id, neighbor.channels, neighbor.delay,
+                         neighbor.cost);
         }
       }
     }
@@ -97,22 +107,46 @@ class Graph {
   // u and v are 0-based identifiers of an edge endpoint. An edge is
   // bi-directional, i.e., calling Graph::add_edge with u = 1, v = 3 will add
   // both (1, 3) and (3, 1) in the graph.
-  int add_edge(int u, int v, long bw, int delay, int cost) {
+  int add_edge(int u, int v, int ch, int delay, int cost) {
     if (adj_list_->size() < u + 1) adj_list_->resize(u + 1);
     if (adj_list_->size() < v + 1) adj_list_->resize(v + 1);
-    adj_list_->at(u).push_back(edge_endpoint(v, bw, delay, cost));
-    adj_list_->at(v).push_back(edge_endpoint(u, bw, delay, cost));
+    adj_list_->at(u).push_back(edge_endpoint(v, ch, delay, cost));
+    adj_list_->at(v).push_back(edge_endpoint(u, ch, delay, cost));
     ++edge_count_;
     node_count_ = adj_list_->size();
   }
 
-  void reduce_edge_residual_bandwidth(int u, int v, long bw_delta) {
-    auto& neighbors = adj_list_->at(u);
-    for (auto& end_point : neighbors) {
+  void reduce_edge_residual_channels(int u, int v, int ch_delta) {
+    auto& u_neighbors = adj_list_->at(u);
+    for (auto& end_point : u_neighbors) {
       if (end_point.node_id == v) {
-        end_point.residual_bandwidth -= bw_delta;
+        end_point.residual_channels -= ch_delta;
       }
     }
+    auto& v_neighbors = adj_list_->at(v);
+    for (auto& end_point : v_neighbors) {
+      if (end_point.node_id == u)  {
+        end_point.residual_channels -= ch_delta;
+      }
+    }
+  }
+
+  bool remove_edge_available_channel(int u, int v, int ch_index) {
+    if (ch_index > get_edge_channels(u, v) - 1) 
+      return false;
+    auto& u_neighbors = adj_list_->at(u);
+    for (auto& end_point : u_neighbors) {
+      if (end_point.node_id == v) {
+        end_point.available_channels.erase(ch_index);
+      }
+    }
+    auto& v_neighbors = adj_list_->at(v);
+    for (auto& end_point : v_neighbors) {
+      if (end_point.node_id == u) {
+        end_point.available_channels.erase(ch_index);
+      }
+    }
+    return true;
   }
 
   int get_edge_cost(int u, int v) const {
@@ -122,12 +156,20 @@ class Graph {
     }
   }
 
-  long get_edge_bandwidth(int u, int v) const {
+  int get_edge_channels(int u, int v) const {
     auto& neighbors = adj_list_->at(u);
     for (auto& end_point : neighbors) {
-      if (end_point.node_id == v) return end_point.bandwidth;
+      if (end_point.node_id == v) return end_point.channels;
     }
   }
+
+  int get_edge_residual_channels(int u, int v) const {
+    auto& neighbors = adj_list_->at(u);
+    for (auto& end_point : neighbors) {
+      if (end_point.node_id == v) return end_point.residual_channels;
+    }
+  }
+
   // Export the graph as a list of edges.
   std::unique_ptr<std::vector<Edge>> ExportAsEdgeList() {
     std::unique_ptr<std::vector<Edge>> edge_list(new std::vector<Edge>());
@@ -135,10 +177,10 @@ class Graph {
       auto& neighbors = this->adj_list()->at(u);
       for (auto& end_point : neighbors) {
         int v = end_point.node_id;
-        long bandwidth = end_point.bandwidth;
+        int channels = end_point.channels;
         int cost = end_point.cost;
         if (u < v) continue;
-        edge_list->push_back(Edge(u, v, bandwidth, cost));
+        edge_list->push_back(Edge(u, v, channels, cost));
       }
     }
     return std::move(edge_list);
@@ -228,9 +270,11 @@ class DisjointSet {
 struct VNEmbedding {
   std::unique_ptr<std::vector<std::vector<int>>> node_map;
   std::unique_ptr<std::map<std::pair<int, int>,
-                           std::vector<std::pair<int, int>>>> primary_edge_map;
+                           std::pair<int, std::vector<std::pair<int, int>>>>>
+      primary_edge_map;
   std::unique_ptr<std::map<std::pair<int, int>,
-                           std::vector<std::pair<int, int>>>> backup_edge_map;
+                           std::pair<int, std::vector<std::pair<int, int>>>>>
+      backup_edge_map;
   long cost;
 };
 
