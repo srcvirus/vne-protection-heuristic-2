@@ -65,8 +65,9 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
   dwdm_path->first = NIL;
   dwdm_path->second = std::unique_ptr<std::vector<int>>(new std::vector<int>());
   DEBUG("Starting BS\n");
-  while(ch_lo < ch_hi) {
-    int ch_mid = (ch_lo + ch_hi) / 2;
+  for (int ch_mid = 0; ch_mid < 7; ++ch_mid) {
+  // while(ch_lo < ch_hi) {
+    // int ch_mid = (ch_lo + ch_hi) / 2;
     std::priority_queue<dijkstra_node> Q;
     std::vector<int> pre(kNodeCount, NIL);
     std::vector<int> d(kNodeCount, INF);
@@ -92,7 +93,7 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
     }
     DEBUG("Dijkstra completed\n");
     if (d[dest] != INF) {
-      ch_hi = ch_mid;
+      // ch_hi = ch_mid;
       int node = dest;
       dwdm_path->first = ch_hi;
       std::vector<int>* path = dwdm_path->second.get();
@@ -103,9 +104,11 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
       }
       if (!path->empty()) path->push_back(node);
       std::reverse(path->begin(), path->end());
-    } else {
-      ch_lo = ch_mid + 1;
-    }
+      break;
+    } 
+    // else {
+    //  ch_lo = ch_mid + 1;
+    //}
   }
   return std::move(dwdm_path);
 }
