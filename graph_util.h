@@ -81,7 +81,6 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
       }
     }
     if (visited[dest]) {
-      DEBUG("Success for channel: %d\n", ch_mid);
       ch_hi = ch_mid;
       int node = dest;
       dwdm_path->first = ch_hi;
@@ -91,7 +90,6 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
         path->push_back(node);
         node = pre[node];
       }
-      DEBUG("path->size() = %d\n", path->size());
       if (!path->empty()) path->push_back(node);
       std::reverse(path->begin(), path->end());
     } else {
