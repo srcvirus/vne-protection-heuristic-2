@@ -44,6 +44,14 @@ std::unique_ptr<std::vector<int>> BFS(const Graph* graph,
   return std::move(path);
 }
 
+struct dijkstra_node {
+  int u, cost;
+  dijkstra_node(int u, int cost): u(u), cost(cost) {}
+  bool operator < (const dijkstra_node dnode) const {
+    return cost < dnode.cost;
+  }
+};
+
 std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
     const Graph* graph,
     const std::vector<int>& partition,
@@ -58,29 +66,29 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
   dwdm_path->second = std::unique_ptr<std::vector<int>>(new std::vector<int>());
   while(ch_lo < ch_hi) {
     int ch_mid = (ch_lo + ch_hi) / 2;
-    std::queue<int> Q;
-    std::vector<bool> visited(kNodeCount, false);
+    std::priority_queue<dijkstra_node> Q;
     std::vector<int> pre(kNodeCount, NIL);
-    Q.push(src);
-    visited[src] = true;
+    std::vector<int> d(kNodeCount, INF);
+    Q.push(dijkstra_node(src,0));
+    d[src] = 0;
     while(!Q.empty()) {
-      int u = Q.front();
+      dijkstra_node dnode = Q.top();
+      int u = dnode.u;
       Q.pop();
-      visited[u] = true;
       auto& u_neighbors = graph->adj_list()->at(u);
       for (auto& end_point : u_neighbors) {
         int v = end_point.node_id;
         bool has_valid_channel = (end_point.available_channels.find(ch_mid) 
             != end_point.available_channels.end());
-        if (has_valid_channel && !visited[v] && in_partition[u] && 
-            in_partition[v] && end_point.residual_channels >= ch) {
-          Q.push(v);
+        if (has_valid_channel && in_partition[u] && in_partition[v] && 
+            end_point.residual_channels >= ch && d[v] > d[u] + end_point.cost) {
+          d[v] = d[u] + end_point.cost;
+          Q.push(dijkstra_node(v, d[v]));
           pre[v] = u;
-          if (v == dest) break;
         }
       }
     }
-    if (visited[dest]) {
+    if (d[dest] != INF) {
       ch_hi = ch_mid;
       int node = dest;
       dwdm_path->first = ch_hi;
