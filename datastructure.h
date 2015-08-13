@@ -107,9 +107,15 @@ class Graph {
   }
 
   void reduce_edge_residual_bandwidth(int u, int v, long bw_delta) {
-    auto& neighbors = adj_list_->at(u);
-    for (auto& end_point : neighbors) {
+    auto& u_neighbors = adj_list_->at(u);
+    for (auto& end_point : u_neighbors) {
       if (end_point.node_id == v) {
+        end_point.residual_bandwidth -= bw_delta;
+      }
+    }
+    auto& v_neighbors = adj_list_->at(v);
+    for (auto& end_point : v_neighbors) {
+      if (end_point.node_id == u) {
         end_point.residual_bandwidth -= bw_delta;
       }
     }
