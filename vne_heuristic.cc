@@ -29,6 +29,7 @@ void* EmbedVNThread(void* args) {
   embedding->cost = INF;
 
   // Find an initial embedding of the virtual nodes.
+  DEBUG("[%x]: Starting Initial node mapping\n", tid);
   auto initial_node_map = CreateInitialNodeMap(
       phys_topology.get(), *(parameter->location_constraints), seed);
   bool node_map_failed = false;
