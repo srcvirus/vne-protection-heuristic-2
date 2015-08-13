@@ -69,8 +69,9 @@ void* EmbedVNThread(void* args) {
   auto& primary_node_map = (*node_map)[PRIMARY];
   auto& backup_node_map = (*node_map)[BACKUP];
   bool edge_map_failed = false;
-
+  DEBUG("Node mapping complete\n");
   // Primary embedding of virtual links.
+  DEBUG("Mapping vlinks\n");
   auto emap = EmbedVN(phys_topology.get(), virt_topology.get(),
                       primary_partition, primary_node_map);
   for (auto emap_it = emap->begin(); emap_it != emap->end(); ++emap_it) {
@@ -85,7 +86,7 @@ void* EmbedVNThread(void* args) {
     embedding->cost = INF;
     pthread_exit(reinterpret_cast<void*>(embedding));
   }
-
+  DEBUG("Vlink mapping complete\n");
   // Backup embedding of virtual links.
   auto semap = EmbedVN(phys_topology.get(), virt_topology.get(),
                        backup_partition, backup_node_map);

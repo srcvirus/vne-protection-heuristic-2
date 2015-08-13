@@ -64,6 +64,7 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
       new std::pair<int, std::unique_ptr<std::vector<int>>>());
   dwdm_path->first = NIL;
   dwdm_path->second = std::unique_ptr<std::vector<int>>(new std::vector<int>());
+  DEBUG("Starting BS\n");
   while(ch_lo < ch_hi) {
     int ch_mid = (ch_lo + ch_hi) / 2;
     std::priority_queue<dijkstra_node> Q;
@@ -71,6 +72,7 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
     std::vector<int> d(kNodeCount, INF);
     Q.push(dijkstra_node(src,0));
     d[src] = 0;
+    DEBUG("Starting dijkstra\n");
     while(!Q.empty()) {
       dijkstra_node dnode = Q.top();
       int u = dnode.u;
@@ -88,6 +90,7 @@ std::unique_ptr<std::pair<int, std::unique_ptr<std::vector<int>>>> dwdm_bfs(
         }
       }
     }
+    DEBUG("Dijkstra completed\n");
     if (d[dest] != INF) {
       ch_hi = ch_mid;
       int node = dest;
