@@ -15,6 +15,7 @@
 // embedding .
 void* EmbedVNThread(void* args) {
   // Extract the Thread parameters.
+  int tid = pthread_self();
   ThreadParameter* parameter = reinterpret_cast<ThreadParameter*>(args);
   std::unique_ptr<Graph> phys_topology(new Graph(*(parameter->phys_topology)));
   std::unique_ptr<Graph> virt_topology(new Graph(*(parameter->virt_topology)));
@@ -44,13 +45,14 @@ void* EmbedVNThread(void* args) {
     embedding->cost = INF;
     pthread_exit(reinterpret_cast<void*>(embedding));
   }
-
+  DEBUG("[%x]: Initial node mapping done\n", tid);
   // Partition the physical network for primary and backup embedding and then
   // try to re-embed the virtual nodes according to the obtained partition. The
   // idea is to improve the node embedding inside the obtained partitions.
   auto partitions = PartitionGraph(phys_topology.get(), initial_node_map.get());
   auto& primary_partition = (*partitions)[PRIMARY];
   auto& backup_partition = (*partitions)[BACKUP];
+  DEBUG("[%x]: Partitioning complete\n", tid);
   auto node_map = ReEmbedVirtualNodes(
       phys_topology.get(), *(parameter->location_constraints),
       primary_partition, backup_partition, *initial_node_map, seed);
