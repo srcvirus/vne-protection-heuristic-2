@@ -160,6 +160,12 @@ void WriteSolutionToFile(const std::string& filename_prefix,
   FILE* cost_file = fopen((filename_prefix + ".cost").c_str(), "w");
   fprintf(cost_file, "%ld\n", embedding->cost);
   fclose(cost_file);
+
+  // Write status to file.
+  FILE* status_file = fopen((filename_prefix + ".status").c_str(), "w");
+  if (embedding->cost == INF) fprintf(status_file, "Infeasible\n");
+  else fprintf(status_file, "Successful\n");
+  fclose(status_file);
 }
 
 // This function takes a physical topology, a virtual topology and
