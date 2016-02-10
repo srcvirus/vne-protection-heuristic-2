@@ -284,6 +284,10 @@ int main(int argc, char* argv[]) {
           solution_end_time - solution_start_time).count();
   printf("Solution time: %llu.%llus\n", elapsed_time / 1000000000LL,
          elapsed_time % 1000000000LL);
+  FILE* fp = fopen((vn_topology_filename + ".time").c_str(), "w");
+  fprintf(fp, "%llu.%llus", elapsed_time / 1000000000LL, 
+      elapsed_time % 1000000000LL);
+  fclose(fp);
   WriteSolutionToFile(vn_topology_filename, embedding.get());
   return 0;
 }
