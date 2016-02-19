@@ -293,11 +293,11 @@ EmbedVN(Graph* phys_topology, const Graph* virt_topology,
       long bw = vend_point.bandwidth;
       auto emap =
           EmbedVLink(phys_topology, partition, node_map[u], node_map[v], bw);
-      edge_map->insert(
-          std::make_pair(std::pair<int, int>(u, v), std::move(emap)));
       for (auto& e : emap) {
         phys_topology->reduce_edge_residual_bandwidth(e.first, e.second, bw);
       }
+      edge_map->insert(
+          std::make_pair(std::pair<int, int>(u, v), std::move(emap)));
     }
   }
   return std::move(edge_map);

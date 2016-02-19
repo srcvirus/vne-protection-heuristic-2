@@ -134,6 +134,14 @@ class Graph {
       if (end_point.node_id == v) return end_point.bandwidth;
     }
   }
+
+  long get_edge_residual_bandwidth(int u, int v) const {
+    auto& neighbors = adj_list_->at(u);
+    for (auto& end_point : neighbors) {
+      if (end_point.node_id == v) return end_point.residual_bandwidth;
+    }
+  }
+
   // Export the graph as a list of edges.
   std::unique_ptr<std::vector<Edge>> ExportAsEdgeList() {
     std::unique_ptr<std::vector<Edge>> edge_list(new std::vector<Edge>());
